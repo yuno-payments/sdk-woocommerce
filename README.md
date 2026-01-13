@@ -13,12 +13,13 @@ This plugin uses the **Yuno Web SDK** and an intermediate layer in WordPress (RE
 ## ✨ Features
 
 - 💳 Card payment using **Yuno**
-- 🔐 Secure keys (PUBLIC / PRIVATE / ACCOUNT CODE)
+- 🔐 Secure keys configuration via WordPress Admin UI
 - ⚙️ Integration via **REST API**
 - 🧠 Prevents double SDK initialization
 - ♻️ Compatible with WooCommerce re-render (`updated_checkout`)
-- 🧪 **Sandbox** support
+- 🧪 **Sandbox** support with environment selector
 - 📦 Modular and extensible code
+- 🐛 Debug logging option
 
 ---
 
@@ -61,34 +62,6 @@ thix-yuno-card/
 
 ---
 
-## 🔐 Required Environment Variables
-
-These variables **should NOT be versioned**.
-
-### Option A – `wp-config.php`
-
-```php
-define('ACCOUNT_CODE', 'your_account_code');
-define('PUBLIC_API_KEY', 'sandbox_xxx');
-define('PRIVATE_SECRET_KEY', 'xxx');
-```
-
-### Option B – Environment (Docker / wp-env)
-
-Copy `.wp-env.json.example` to `.wp-env.json` and fill in your credentials:
-
-```json
-{
-  "config": {
-    "ACCOUNT_CODE": "your-yuno-account-code",
-    "PUBLIC_API_KEY": "sandbox_your-public-api-key",
-    "PRIVATE_SECRET_KEY": "your-private-secret-key"
-  }
-}
-```
-
----
-
 ## 🚀 Installation
 
 ### Manual Installation
@@ -107,7 +80,7 @@ Copy `.wp-env.json.example` to `.wp-env.json` and fill in your credentials:
    WooCommerce → Settings → Payments → Card (Yuno)
    ```
 
-5. Enable the payment method
+5. Configure your Yuno credentials and enable the payment method
 
 ### Development with wp-env
 
@@ -116,25 +89,64 @@ Copy `.wp-env.json.example` to `.wp-env.json` and fill in your credentials:
    npm install
    ```
 
-2. Copy the environment file:
-   ```bash
-   cp .wp-env.json.example .wp-env.json
-   ```
-
-3. Add your Yuno credentials to `.wp-env.json`
-
-4. Start the environment:
+2. Start the environment:
    ```bash
    npx wp-env start
    ```
 
-5. Access WordPress at `http://localhost:8888`
+3. Access WordPress at `http://localhost:8888`
+
+4. Configure the plugin via WordPress Admin UI
+
+---
+
+## ⚙️ Configuration
+
+All settings are configured through the **WordPress Admin UI**:
+
+```
+WooCommerce → Settings → Payments → Card (Yuno)
+```
+
+### Available Settings
+
+| Setting | Description |
+|---------|-------------|
+| **Enable** | Enable/disable the payment method |
+| **Checkout Title** | Name displayed to users at checkout |
+| **Environment** | Select Yuno environment (Sandbox, Production, Staging, Dev) |
+| **ACCOUNT_CODE** | Your Yuno account code |
+| **PUBLIC_API_KEY** | Public API key (used in frontend to initialize the SDK) |
+| **PRIVATE_SECRET_KEY** | Private secret key (backend only) |
+| **Debug** | Enable debug logs using WooCommerce logger |
+
+### Alternative Configuration (Optional)
+
+For development or advanced setups, credentials can also be set via:
+
+**Option A – `wp-config.php`**
+
+```php
+define('ACCOUNT_CODE', 'your_account_code');
+define('PUBLIC_API_KEY', 'sandbox_xxx');
+define('PRIVATE_SECRET_KEY', 'xxx');
+```
+
+**Option B – Environment variables (Docker / wp-env)**
+
+```bash
+ACCOUNT_CODE=xxx
+PUBLIC_API_KEY=sandbox_xxx
+PRIVATE_SECRET_KEY=xxx
+```
+
+> **Note:** Settings in the WordPress Admin UI take priority over environment variables.
 
 ---
 
 ## 🧪 Sandbox Mode (Testing)
 
-Yuno detects the environment based on the Public API Key prefix:
+Select the environment in the plugin settings. Yuno also detects the environment based on the Public API Key prefix:
 
 | Prefix     | Environment |
 |------------|-------------|
@@ -203,7 +215,7 @@ Yuno detects the environment based on the Public API Key prefix:
 
 ## 👨‍💻 Author
 
-**Miguel Atencia**
+**YUNO**
 
 ---
 

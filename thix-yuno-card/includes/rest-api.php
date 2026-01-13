@@ -8,13 +8,34 @@ if (!defined('ABSPATH')) exit;
  */
 
 function thix_yuno_get_env($key, $default = '') {
+
+  // 0) First: settings saved in WooCommerce gateway
+  // option name: woocommerce_{gateway_id}_settings
+  $settings = get_option('woocommerce_thix_yuno_card_settings', []);
+  if (is_array($settings)) {
+    $map = [
+      'ACCOUNT_CODE'        => 'account_code',
+      'PUBLIC_API_KEY'      => 'public_api_key',
+      'PRIVATE_SECRET_KEY'  => 'private_secret_key',
+      'ENVIRONMENT'         => 'environment',
+      'DEBUG'               => 'debug',
+    ];
+    if (isset($map[$key])) {
+      $k = $map[$key];
+      if (!empty($settings[$k])) return $settings[$k];
+    }
+  }
+
+  // 1) getenv() (wp-env / docker / host)
   $v = getenv($key);
   if ($v !== false && $v !== null && $v !== '') return $v;
 
+  // 2) define('KEY','value') in wp-config.php
   if (defined($key) && constant($key) !== '') return constant($key);
 
   return $default;
 }
+  
 
 function thix_yuno_api_url_from_public_key($publicKey) {
   $prefix = explode('_', (string)$publicKey)[0] ?? '';
