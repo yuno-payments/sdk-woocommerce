@@ -1,10 +1,6 @@
 # Dependencies
 node_modules/
 
-# WordPress Environment (contains sensitive API keys)
-.wp-env.json
-.wp-env.override.json
-
 # WordPress generated files
 wp-content/
 wordpress/
