@@ -74,10 +74,23 @@ export async function createPayment({ oneTimeToken, checkoutSession, orderId, or
         screen_height: window.screen?.height,
         screen_width: window.screen?.width,
         color_depth: window.screen?.colorDepth,
-        javascript_enabled: true
-      }
+        javascript_enabled: true,
+      },
     }),
   });
+
+  // ✅ IMPORTANT: 409 is expected for anti-double-charge guardrails
+  // We treat it as a non-fatal "already handled / in progress" response.
+  if (res.status === 409) {
+    const payload = await safeJson(res);
+
+    return {
+      ok: false,
+      handled: true,          // <-- tells checkout.js this is expected
+      http_status: 409,
+      ...payload,
+    };
+  }
 
   if (!res.ok) {
     const payload = await safeJson(res);

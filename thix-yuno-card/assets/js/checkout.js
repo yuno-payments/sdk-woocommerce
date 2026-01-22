@@ -63,7 +63,7 @@ function resolvePayButtonTarget(e) {
 function guardContext() {
   if (state.payForOrder) {
     if (!state.orderId) throw new Error("[YUNO] Missing orderId in order-pay context.");
-    // orderKey recomendado, pero no lo hacemos hard fail
+    // orderKey is recommended, but we do not hard fail
     if (!state.orderKey) console.warn("[YUNO] orderKey empty (recommended).");
   }
 }
@@ -184,12 +184,27 @@ async function startYunoCheckout() {
         setLoaderVisible(true);
 
         try {
-          const paymentRes = await createPayment({
+          // 🔍 Build payload we send to backend (useful when Split is ON)
+          const payload = {
             oneTimeToken,
             checkoutSession: state.checkoutSession,
             orderId: state.orderId,
             orderKey: state.orderKey,
-          });
+          };
+
+          // ✅ Debug: confirm exactly what we send to /payments
+          console.log("[THIX YUNO] createPayment payload -> backend:", payload);
+
+          const paymentRes = await createPayment(payload);
+
+          // ✅ Debug: confirm split data
+          console.log("[THIX YUNO] /payments split response:", paymentRes?.split || "No split data");
+
+          if (paymentRes?.handled) {
+            console.warn("[YUNO] createPayment returned 409 (handled)", paymentRes);
+            return;
+          }
+
 
           // ✅ Source of truth (more reliable than yunoPaymentResult payload)
           state.lastPaymentStatus = paymentRes?.response?.status || "UNKNOWN";

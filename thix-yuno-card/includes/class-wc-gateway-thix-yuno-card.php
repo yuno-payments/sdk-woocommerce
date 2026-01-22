@@ -89,6 +89,30 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'default'     => '',
         'desc_tip'    => true,
       ],
+         
+    // ✅ Split (Phase 1)
+      'split_enabled' => [
+        'title'       => 'Split Payments',
+        'type'        => 'checkbox',
+        'label'       => 'Enable marketplace split',
+        'default'     => 'no',
+        'description' => 'If enabled, the plugin will include split_marketplace data when creating the payment.',
+      ],
+      'yuno_recipient_id' => [
+        'title'       => 'Yuno Recipient ID',
+        'type'        => 'text',
+        'description' => 'Recipient ID created in Yuno (NOT provider recipient ID). Required when Split is enabled.',
+        'default'     => '',
+        'desc_tip'    => true,
+      ],
+      'split_fixed_amount' => [
+        'title'       => 'Fixed Split Amount (minor units)',
+        'type'        => 'text',
+        'description' => 'Fixed split amount in minor units. Example: COP=1000 means $1.000 COP. Required when Split is enabled.',
+        'default'     => '',
+        'desc_tip'    => true,
+      ],
+
       'debug' => [
         'title'       => 'Debug',
         'type'        => 'checkbox',
@@ -98,6 +122,45 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       ],
     ];
   }
+
+  public function process_admin_options() {
+    $saved = parent::process_admin_options();
+  
+    // Reload saved settings
+    $split_enabled = $this->get_option('split_enabled', 'no') === 'yes';
+    $recipient_id  = trim((string) $this->get_option('yuno_recipient_id', ''));
+    $fixed_amount  = trim((string) $this->get_option('split_fixed_amount', ''));
+  
+    if ($split_enabled) {
+      $errors = [];
+  
+      if ($recipient_id === '') {
+        $errors[] = 'Yuno Recipient ID is required when Split is enabled.';
+      }
+  
+      // fixed_amount must be an integer >= 1
+      if ($fixed_amount === '' || !ctype_digit($fixed_amount) || (int)$fixed_amount <= 0) {
+        $errors[] = 'Fixed Split Amount must be a positive integer (minor units) when Split is enabled.';
+      }
+  
+      if (!empty($errors)) {
+        foreach ($errors as $msg) {
+          // Show error in admin
+          WC_Admin_Settings::add_error($msg);
+        }
+  
+        // ✅ Fail-safe: disable split to avoid leaving invalid config active
+        $this->update_option('split_enabled', 'no');
+        WC_Admin_Settings::add_error('Split was automatically disabled due to invalid configuration.');
+  
+        // Refresh in-memory
+        $this->init_settings();
+      }
+    }
+  
+    return $saved;
+  }
+  
 
   /**
    * Settings helpers for rest-api.php
