@@ -19,14 +19,15 @@ function thix_yuno_get_env($key, $default = '') {
       'ENVIRONMENT'         => 'environment',
       'DEBUG'               => 'debug',
 
-      // ✅ Split (Phase 1)
+      // ✅ Split
       'SPLIT_ENABLED'       => 'split_enabled',
       'YUNO_RECIPIENT_ID'   => 'yuno_recipient_id',
       'SPLIT_FIXED_AMOUNT'  => 'split_fixed_amount',
     ];
     if (isset($map[$key])) {
       $k = $map[$key];
-      if (isset($settings[$k]) && $settings[$k] !== '') return $settings[$k];
+      // ojo: en checkbox el valor suele ser 'yes'/'no'. Permitimos 'no' como válido.
+      if (array_key_exists($k, $settings) && $settings[$k] !== '') return $settings[$k];
     }
   }
 
@@ -88,15 +89,24 @@ function thix_yuno_wp_remote_json($method, $url, $headers = [], $body = null, $t
   ];
 }
 
-function thix_yuno_amount_minor_units($total, $currency) {
-  $currency = strtoupper((string)$currency);
-  $total = (float)$total;
+/**
+ * ✅ WooCommerce is source of truth for decimals.
+ * Uses Woo setting: WooCommerce → Settings → General → Number of decimals
+ */
+function thix_yuno_get_wc_price_decimals() {
+  $d = get_option('woocommerce_price_num_decimals', 2);
+  $d = is_numeric($d) ? (int) $d : 2;
+  if ($d < 0) $d = 0;
+  if ($d > 6) $d = 6; // safety cap
+  return $d;
+}
 
-  $zero_decimal = ['COP', 'CLP', 'JPY'];
-  if (in_array($currency, $zero_decimal, true)) {
-    return (int) round($total);
-  }
-  return (int) round($total * 100);
+function thix_yuno_amount_minor_units($total, $currency) {
+  // currency kept for future; decimals come from Woo settings
+  $total = (float) $total;
+  $decimals = thix_yuno_get_wc_price_decimals();
+  $mult = pow(10, $decimals);
+  return (int) round($total * $mult);
 }
 
 function thix_yuno_get_order_from_request(WP_REST_Request $request) {
@@ -128,7 +138,8 @@ function thix_yuno_get_order_from_request(WP_REST_Request $request) {
 }
 
 /**
- * ✅ Stable idempotency key per order + checkout session (prevents duplicates on retries)
+ * Build a STABLE idempotency key per order + checkout session.
+ * Prevents duplicate charges even if frontend retries.
  */
 function thix_yuno_build_idempotency_key($order_id, $checkout_session) {
   $order_id = (int) $order_id;
@@ -140,11 +151,30 @@ function thix_yuno_build_idempotency_key($order_id, $checkout_session) {
   return 'wc-' . $order_id . '-yuno-' . substr($hash, 0, 24);
 }
 
+function thix_yuno_debug_enabled() {
+  $dbg = (string) thix_yuno_get_env('DEBUG', 'no');
+  return ($dbg === 'yes' || $dbg === '1' || $dbg === 'true');
+}
+
 /**
- * ✅ Simple lock to prevent concurrent /payments calls
+ * ✅ WooCommerce logger helpers
+ * WooCommerce → Status → Logs → source: thix-yuno
  */
-function thix_yuno_payment_lock_key($order_id) {
-  return 'thix_yuno_payment_lock_' . (int)$order_id;
+function thix_yuno_logger() {
+  static $logger = null;
+  if ($logger === null && function_exists('wc_get_logger')) {
+    $logger = wc_get_logger();
+  }
+  return $logger;
+}
+
+function thix_yuno_log($level, $message, $context = []) {
+  if (!thix_yuno_debug_enabled()) return;
+  $logger = thix_yuno_logger();
+  if (!$logger) return;
+
+  $ctx = array_merge(['source' => 'thix-yuno'], (array)$context);
+  $logger->log($level, $message . ' ' . wp_json_encode($ctx), ['source' => 'thix-yuno']);
 }
 
 /**
@@ -206,7 +236,7 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
   [$order, $err] = thix_yuno_get_order_from_request($request);
   if ($err) return $err;
 
-  // ✅ If already paid, do not create/reuse sessions
+  // Guardrail: if already paid, do not create sessions again
   if ($order->is_paid()) {
     return thix_yuno_json([
       'error' => 'Order already paid',
@@ -216,10 +246,11 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
     ], 409);
   }
 
-  // ✅ Reuse existing checkout session
+  // Reuse checkout session if already created for this order
   $existingSession = (string) $order->get_meta('_thix_yuno_checkout_session');
-  if ($existingSession !== '') {
+  if (!empty($existingSession)) {
     $country = $order->get_billing_country() ?: 'CO';
+
     return thix_yuno_json([
       'checkout_session' => $existingSession,
       'country' => $country,
@@ -234,6 +265,16 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
   $currency = $order->get_currency() ?: 'COP';
   $total    = (float) $order->get_total();
   $value    = thix_yuno_amount_minor_units($total, $currency);
+
+  // ✅ LOG: decimals + computed minor units
+  thix_yuno_log('info', 'checkout-session computed amount', [
+    'order_id' => $order->get_id(),
+    'currency' => $currency,
+    'wc_decimals' => thix_yuno_get_wc_price_decimals(),
+    'order_total_raw' => $order->get_total(),
+    'order_total_float' => $total,
+    'minor_units_value' => $value,
+  ]);
 
   $payload = [
     'account_id' => $accountCode,
@@ -259,6 +300,12 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
   );
 
   if (!$res['ok']) {
+    thix_yuno_log('error', 'checkout-session failed', [
+      'order_id' => $order->get_id(),
+      'status' => $res['status'],
+      'response' => $res['raw'],
+    ]);
+
     return thix_yuno_json([
       'error' => 'Yuno create checkout session failed',
       'status' => $res['status'],
@@ -273,6 +320,11 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
     : null;
 
   if (!$checkoutSession) {
+    thix_yuno_log('error', 'checkout-session response missing checkout_session/id', [
+      'order_id' => $order->get_id(),
+      'response' => $res['raw'],
+    ]);
+
     return thix_yuno_json([
       'error' => 'Yuno response missing checkout_session/id',
       'response' => $res['raw'],
@@ -281,6 +333,11 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
 
   $order->update_meta_data('_thix_yuno_checkout_session', $checkoutSession);
   $order->save();
+
+  thix_yuno_log('info', 'checkout-session created', [
+    'order_id' => $order->get_id(),
+    'checkout_session' => (string)$checkoutSession,
+  ]);
 
   return thix_yuno_json([
     'checkout_session' => $checkoutSession,
@@ -292,7 +349,7 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
 
 /**
  * =========================
- * Create Payment (ANTI DOUBLE CHARGE + SPLIT)
+ * Create Payment (Guardrails + stable idempotency + Split Marketplace FIX)
  * body: { oneTimeToken, checkoutSession, order_id, order_key? }
  * =========================
  */
@@ -320,13 +377,10 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     ], 400);
   }
 
-  // =========================
-  // ✅ Anti double charge guardrails
-  // =========================
-
-  // 1) If already paid -> block
+  // ✅ Basic guardrails
   if ($order->is_paid()) {
     return thix_yuno_json([
+      'handled' => true,
       'error' => 'Order already paid',
       'order_id' => $order->get_id(),
       'status' => $order->get_status(),
@@ -334,165 +388,209 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     ], 409);
   }
 
-  // 2) Only allow payment in pending (this is your POC rule)
-  $status = (string) $order->get_status();
-  if ($status !== 'pending') {
+  if ($order->get_status() !== 'pending') {
     return thix_yuno_json([
-      'error' => 'Order is not payable in current status',
+      'handled' => true,
+      'error' => 'Order is not pending',
       'order_id' => $order->get_id(),
-      'status' => $status,
+      'status' => $order->get_status(),
     ], 409);
   }
 
-  // 3) If we already have a payment_id stored, block duplicates
   $existingPaymentId = (string) $order->get_meta('_thix_yuno_payment_id');
-  if ($existingPaymentId !== '') {
+  if (!empty($existingPaymentId)) {
     return thix_yuno_json([
+      'handled' => true,
       'error' => 'Payment already created for this order',
       'order_id' => $order->get_id(),
       'payment_id' => $existingPaymentId,
-      'status' => $status,
     ], 409);
   }
 
-  // 4) Lock to avoid concurrent double-click requests
-  $lock_key = thix_yuno_payment_lock_key($order->get_id());
-  if (get_transient($lock_key)) {
+  // ✅ transient lock to prevent double-tap requests in parallel
+  $lockKey = 'thix_yuno_pay_lock_' . (int)$order->get_id();
+  if (get_transient($lockKey)) {
     return thix_yuno_json([
-      'error' => 'Payment creation already in progress',
+      'handled' => true,
+      'error' => 'Payment creation is already in progress for this order',
       'order_id' => $order->get_id(),
     ], 409);
   }
-  set_transient($lock_key, 1, 15); // 15 seconds lock
+  set_transient($lockKey, 1, 30);
 
-  try {
-    $apiUrl = thix_yuno_api_url_from_public_key($publicKey);
+  $apiUrl = thix_yuno_api_url_from_public_key($publicKey);
 
-    $country  = $order->get_billing_country() ?: 'CO';
-    $currency = $order->get_currency() ?: 'COP';
-    $total    = (float) $order->get_total();
-    $value    = thix_yuno_amount_minor_units($total, $currency);
+  $country  = $order->get_billing_country() ?: 'CO';
+  $currency = $order->get_currency() ?: 'COP';
+  $total    = (float) $order->get_total();
+  $value    = thix_yuno_amount_minor_units($total, $currency);
 
-    // =========================
-    // ✅ Split settings (Phase 1)
-    // =========================
-    $split_enabled_setting = thix_yuno_get_env('SPLIT_ENABLED', 'no');
-    $split_enabled = ($split_enabled_setting === 'yes' || $split_enabled_setting === '1' || $split_enabled_setting === 'true');
+  // ✅ stable idempotency per order+session
+  $idempotencyKey = thix_yuno_build_idempotency_key($order->get_id(), $checkoutSession);
 
-    $recipient_id = trim((string) thix_yuno_get_env('YUNO_RECIPIENT_ID', ''));
-    $fixed_amount_raw = trim((string) thix_yuno_get_env('SPLIT_FIXED_AMOUNT', ''));
-    $fixed_amount = (ctype_digit($fixed_amount_raw) ? (int) $fixed_amount_raw : 0);
+  // =========================
+  // ✅ Split settings (Phase 1)
+  // =========================
+  $split_enabled_setting = (string) thix_yuno_get_env('SPLIT_ENABLED', 'no');
+  $split_enabled = ($split_enabled_setting === 'yes' || $split_enabled_setting === '1' || $split_enabled_setting === 'true');
 
-    if ($split_enabled) {
-      if ($recipient_id === '') {
-        return thix_yuno_json([
-          'error' => 'Split is enabled but Yuno Recipient ID is missing',
-        ], 400);
-      }
+  $recipient_id = trim((string) thix_yuno_get_env('YUNO_RECIPIENT_ID', ''));
+  $fixed_amount_raw = trim((string) thix_yuno_get_env('SPLIT_FIXED_AMOUNT', ''));
+  $fixed_amount = (ctype_digit($fixed_amount_raw) ? (int) $fixed_amount_raw : 0);
 
-      if ($fixed_amount <= 0) {
-        return thix_yuno_json([
-          'error' => 'Split is enabled but Fixed Split Amount is invalid (must be > 0, minor units)',
-        ], 400);
-      }
+  // ✅ LOG: computed amount + split summary (before payload)
+  thix_yuno_log('info', 'payments computed amount', [
+    'order_id' => $order->get_id(),
+    'order_status' => $order->get_status(),
+    'currency' => $currency,
+    'wc_decimals' => thix_yuno_get_wc_price_decimals(),
+    'order_total_raw' => $order->get_total(),
+    'order_total_float' => $total,
+    'minor_units_value' => $value,
+    'split_enabled' => $split_enabled,
+    'split_fixed_amount' => ($split_enabled ? $fixed_amount : null),
+    'split_remainder' => ($split_enabled ? ($value - $fixed_amount) : null),
+    'idempotency_key' => $idempotencyKey,
+    'checkout_session' => (string) $checkoutSession,
+  ]);
 
-      if ($fixed_amount >= $value) {
-        return thix_yuno_json([
-          'error' => 'Split is enabled but Fixed Split Amount must be less than order total',
-          'fixed_amount' => $fixed_amount,
-          'order_total_minor_units' => $value,
-        ], 400);
-      }
-    }
-
-    $payload = [
-      'description' => 'WooCommerce Payment #' . $order->get_id(),
-      'account_id' => $accountCode,
-      'merchant_order_id' => 'WC-' . $order->get_id(),
-      'country' => $country,
-      'amount' => [
-        'currency' => $currency,
-        'value' => $value,
-      ],
-      'checkout' => [
-        'session' => $checkoutSession,
-      ],
-      'payment_method' => [
-        'token' => $oneTimeToken,
-        'vaulted_token' => null,
-      ],
-    ];
-
-    if ($split_enabled) {
-      $payload['split_marketplace'] = [
-        'recipients' => [
-          [
-            'recipient_id' => $recipient_id,
-            'amount' => $fixed_amount,
-          ]
-        ],
-      ];
-    }
-
-    // ✅ Stable idempotency key (REAL fix vs UUID)
-    $idempotency_key = thix_yuno_build_idempotency_key($order->get_id(), $checkoutSession);
-
-    $res = thix_yuno_wp_remote_json(
-      'POST',
-      "{$apiUrl}/v1/payments",
-      [
-        'public-api-key' => $publicKey,
-        'private-secret-key' => $secretKey,
-        'X-idempotency-key' => $idempotency_key,
-        'Content-Type' => 'application/json',
-      ],
-      $payload,
-      30
-    );
-
-    if (!$res['ok']) {
-      // ❗️IMPORTANT: do NOT set order to failed here. Keep pending to allow retry on order-pay.
-      $order->add_order_note(
-        'Yuno payment create failed. idempotency=' . $idempotency_key . ' response=' .
-        (is_string($res['raw']) ? $res['raw'] : wp_json_encode($res['raw']))
-      );
-      $order->save();
-
+  // Validate split config only if enabled
+  if ($split_enabled) {
+    if ($recipient_id === '') {
+      delete_transient($lockKey);
       return thix_yuno_json([
-        'error' => 'Yuno create payment failed',
-        'status' => $res['status'],
-        'idempotency_key' => $idempotency_key,
-        'response' => $res['raw'],
+        'error' => 'Split is enabled but Yuno Recipient ID is missing',
       ], 400);
     }
 
-    $payment_id = is_array($res['raw'])
-      ? ($res['raw']['id'] ?? $res['raw']['payment_id'] ?? null)
-      : null;
-
-    if ($payment_id) {
-      $order->update_meta_data('_thix_yuno_payment_id', $payment_id);
+    if ($fixed_amount <= 0) {
+      delete_transient($lockKey);
+      return thix_yuno_json([
+        'error' => 'Split is enabled but Fixed Split Amount is invalid (must be > 0, minor units)',
+      ], 400);
     }
-    $order->update_meta_data('_thix_yuno_payment_raw', $res['raw']);
-    $order->update_meta_data('_thix_yuno_idempotency_key', $idempotency_key);
+
+    if ($fixed_amount >= $value) {
+      delete_transient($lockKey);
+      return thix_yuno_json([
+        'error' => 'Split is enabled but Fixed Split Amount must be less than order total',
+        'fixed_amount' => $fixed_amount,
+        'order_total_minor_units' => $value,
+      ], 400);
+    }
+  }
+
+  $payload = [
+    'description' => 'WooCommerce Payment #' . $order->get_id(),
+    'account_id' => $accountCode,
+    'merchant_order_id' => 'WC-' . $order->get_id(),
+    'country' => $country,
+    'amount' => [
+      'currency' => $currency,
+      'value' => $value,
+    ],
+    'checkout' => [
+      'session' => $checkoutSession,
+    ],
+    'payment_method' => [
+      'token' => $oneTimeToken,
+      'vaulted_token' => null,
+    ],
+  ];
+
+  /**
+   * ✅ Split Marketplace payload (as you already had in your "FIX" version)
+   * NOTE: this structure must match Yuno expectations for split_marketplace.
+   * If Yuno expects a different structure (recipients object), we’ll adjust based on their response.
+   */
+  if ($split_enabled) {
+    $remainder = $value - $fixed_amount;
+
+    $payload['split_marketplace'] = [
+      [
+        'recipient_id' => $recipient_id,
+        'type' => 'PURCHASE',
+        'amount' => [
+          'value' => $fixed_amount,
+          'currency' => $currency,
+        ],
+      ],
+      [
+        'type' => 'COMMISSION',
+        'amount' => [
+          'value' => $remainder,
+          'currency' => $currency,
+        ],
+      ],
+    ];
+  }
+
+  // ✅ LOG: payload sanitized
+  $payload_for_log = $payload;
+  if (isset($payload_for_log['payment_method']['token'])) {
+    $payload_for_log['payment_method']['token'] = '[REDACTED]';
+  }
+  thix_yuno_log('debug', 'payments payload (sanitized)', [
+    'order_id' => $order->get_id(),
+    'payload' => $payload_for_log,
+  ]);
+
+  $res = thix_yuno_wp_remote_json(
+    'POST',
+    "{$apiUrl}/v1/payments",
+    [
+      'public-api-key' => $publicKey,
+      'private-secret-key' => $secretKey,
+      'X-idempotency-key' => $idempotencyKey,
+      'Content-Type' => 'application/json',
+    ],
+    $payload,
+    30
+  );
+
+  // always release lock
+  delete_transient($lockKey);
+
+  // ✅ LOG: response
+  thix_yuno_log('info', 'payments response received', [
+    'order_id' => $order->get_id(),
+    'ok' => $res['ok'],
+    'status' => $res['status'],
+    'response' => $res['raw'],
+  ]);
+
+  if (!$res['ok']) {
+    $order->add_order_note('Yuno payment failed: ' . (is_string($res['raw']) ? $res['raw'] : wp_json_encode($res['raw'])));
+    $order->update_status('failed');
     $order->save();
 
     return thix_yuno_json([
-      'ok' => true,
-      'payment_id' => $payment_id,
-      'idempotency_key' => $idempotency_key,
-      'split' => [
-        'enabled' => $split_enabled,
-        'recipient_id' => $split_enabled ? $recipient_id : null,
-        'fixed_amount' => $split_enabled ? $fixed_amount : null,
-      ],
+      'error' => 'Yuno create payment failed',
+      'status' => $res['status'],
       'response' => $res['raw'],
-    ], 200);
-
-  } finally {
-    // Release lock always
-    delete_transient($lock_key);
+    ], 400);
   }
+
+  $payment_id = is_array($res['raw'])
+    ? ($res['raw']['id'] ?? $res['raw']['payment_id'] ?? null)
+    : null;
+
+  if ($payment_id) $order->update_meta_data('_thix_yuno_payment_id', $payment_id);
+  $order->update_meta_data('_thix_yuno_payment_raw', $res['raw']);
+  $order->save();
+
+  return thix_yuno_json([
+    'ok' => true,
+    'payment_id' => $payment_id,
+    'idempotency_key' => $idempotencyKey,
+    'split' => [
+      'enabled' => $split_enabled,
+      'recipient_id' => $split_enabled ? $recipient_id : null,
+      'fixed_amount' => $split_enabled ? $fixed_amount : null,
+      'currency' => $currency,
+    ],
+    'response' => $res['raw'],
+  ], 200);
 }
 
 /**
@@ -523,7 +621,6 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
   }
 
   if (in_array($status, ['REJECTED','DECLINED','CANCELLED','ERROR','EXPIRED'], true)) {
-    // It is valid to mark failed here (final payment result)
     $order->update_status('failed', 'Yuno: ' . $status);
     $order->add_order_note('Yuno rejected. status=' . $status . ' payment_id=' . ($payment_id ?: 'N/A'));
     $order->save();
