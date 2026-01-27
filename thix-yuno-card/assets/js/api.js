@@ -1,5 +1,3 @@
-// assets/js/api.js
-
 const REST_BASE = window.THIX_YUNO_WC?.restBase;
 const NONCE = window.THIX_YUNO_WC?.nonce;
 
@@ -9,61 +7,118 @@ function assertBase() {
   }
 }
 
+async function safeJson(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
+function wpHeaders(extra = {}) {
+  return {
+    "X-WP-Nonce": NONCE,
+    ...extra,
+  };
+}
+
 export async function getPublicApiKey() {
   assertBase();
 
   const res = await fetch(`${REST_BASE}/public-api-key`, {
     method: "GET",
-    headers: {
-      "X-WP-Nonce": NONCE,
-    },
+    headers: wpHeaders(),
   });
 
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`public-api-key failed: ${res.status} ${txt}`);
-  }
-
+  if (!res.ok) throw new Error(`public-api-key failed: ${res.status} ${await res.text()}`);
   const json = await res.json();
   return json.publicApiKey;
 }
 
-export async function getCheckoutSession() {
+export async function getCheckoutSession({ orderId, orderKey }) {
   assertBase();
 
   const res = await fetch(`${REST_BASE}/checkout-session`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-WP-Nonce": NONCE,
-    },
-    body: JSON.stringify({}),
+    headers: wpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      order_id: orderId,
+      order_key: orderKey,
+    }),
   });
 
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`checkout-session failed: ${res.status} ${txt}`);
+    const payload = await safeJson(res);
+    throw new Error(`checkout-session failed: ${res.status} ${JSON.stringify(payload)}`);
   }
 
   return res.json();
 }
 
-export async function createPayment({ oneTimeToken, checkoutSession }) {
+export async function createPayment({ oneTimeToken, checkoutSession, orderId, orderKey }) {
   assertBase();
 
   const res = await fetch(`${REST_BASE}/payments`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-WP-Nonce": NONCE,
-    },
-    body: JSON.stringify({ oneTimeToken, checkoutSession }),
+    headers: wpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      oneTimeToken,
+      checkoutSession,
+      order_id: orderId,
+      order_key: orderKey,
+      browser_info: {
+        user_agent: navigator.userAgent,
+        language: navigator.language,
+        platform: "WEB",
+        screen_height: window.screen?.height,
+        screen_width: window.screen?.width,
+        color_depth: window.screen?.colorDepth,
+        javascript_enabled: true,
+      },
+    }),
   });
 
+  // ✅ IMPORTANT: 409 is expected for anti-double-charge guardrails
+  // We treat it as a non-fatal "already handled / in progress" response.
+  if (res.status === 409) {
+    const payload = await safeJson(res);
+
+    return {
+      ok: false,
+      handled: true,          // <-- tells checkout.js this is expected
+      http_status: 409,
+      ...payload,
+    };
+  }
+
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`payments failed: ${res.status} ${txt}`);
+    const payload = await safeJson(res);
+    throw new Error(`payments failed: ${res.status} ${JSON.stringify(payload)}`);
   }
 
   return res.json();
+}
+
+export async function confirmOrder({ orderId, orderKey, status, paymentId }) {
+  assertBase();
+
+  const res = await fetch(`${REST_BASE}/confirm`, {
+    method: "POST",
+    headers: wpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      order_id: orderId,
+      order_key: orderKey,
+      status,
+      payment_id: paymentId,
+    }),
+  });
+
+  const json = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(`confirm failed: ${res.status} ${JSON.stringify(json)}`);
+  }
+
+  return json;
 }
