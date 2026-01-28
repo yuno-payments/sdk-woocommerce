@@ -96,7 +96,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'desc_tip'    => true,
       ],
 
-      // ✅ Nuevo recomendado: comisión %
+      // ✅ New recommended: commission %
       'split_commission_percent' => [
         'title'       => 'Commission % (Platform)',
         'type'        => 'text',
@@ -105,7 +105,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'desc_tip'    => true,
       ],
 
-      // Legacy/MVP: comisión fija minor units
+      // Legacy/MVP: fixed commission minor units
       'split_fixed_amount' => [
         'title'       => 'Fixed Commission Amount (minor units)',
         'type'        => 'text',

@@ -96,8 +96,8 @@ function thix_yuno_get_wc_price_decimals() {
 }
 
 /**
- * Legacy helper to convert to minor units (ya no se usa para amount.value enviado a Yuno).
- * Se mantiene por si lo quieres usar en logs o cálculos internos.
+ * Legacy helper to convert to minor units (no longer used for amount.value sent to Yuno).
+ * Kept in case you want to use it in logs or internal calculations.
  */
 function thix_yuno_to_minor_units($total_major) {
     $decimals = thix_yuno_get_wc_price_decimals();
@@ -367,7 +367,7 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
             $commission_mode   = 'fixed';
 
         } else {
-            // split enabled pero sin configuración de comisión -> 0 (passthrough)
+            // split enabled but without commission configuration -> 0 (passthrough)
             $commission_amount = 0.0;
             $commission_mode   = 'zero-default';
         }
