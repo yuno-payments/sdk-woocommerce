@@ -63,7 +63,6 @@ function resolvePayButtonTarget(e) {
 function guardContext() {
   if (state.payForOrder) {
     if (!state.orderId) throw new Error("[YUNO] Missing orderId in order-pay context.");
-    // orderKey is recommended, but we do not hard fail
     if (!state.orderKey) console.warn("[YUNO] orderKey empty (recommended).");
   }
 }
@@ -82,10 +81,8 @@ async function waitForYunoSdk(maxMs = 6000) {
 
 /**
  * Fallback redirect:
- * If backend doesn't return redirect, we convert:
- *   /checkout/order-pay/24/?pay_for_order=true&key=XXX
- * to:
- *   /checkout/order-received/24/?key=XXX
+ * /checkout/order-pay/24/?pay_for_order=true&key=XXX
+ * -> /checkout/order-received/24/?key=XXX
  */
 function fallbackRedirectToOrderReceived() {
   try {
@@ -93,7 +90,6 @@ function fallbackRedirectToOrderReceived() {
 
     url.pathname = url.pathname.replace(/order-pay\/(\d+)/, "order-received/$1");
     url.searchParams.delete("pay_for_order");
-    // keep key param if present
     window.location.href = url.toString();
   } catch (e) {
     console.warn("[YUNO] fallbackRedirect failed, reloading as last resort", e);
@@ -121,8 +117,11 @@ async function startYunoCheckout() {
 
     // 1) Create checkout session (order-based)
     const sessionRes = await getCheckoutSession({
+      // send both styles for backend robustness
       orderId: state.orderId,
       orderKey: state.orderKey,
+      order_id: state.orderId,
+      order_key: state.orderKey,
     });
 
     const checkoutSession = sessionRes?.checkout_session;
@@ -184,20 +183,21 @@ async function startYunoCheckout() {
         setLoaderVisible(true);
 
         try {
-          // 🔍 Build payload we send to backend (useful when Split is ON)
           const payload = {
             oneTimeToken,
             checkoutSession: state.checkoutSession,
+
+            // both formats (defensive)
             orderId: state.orderId,
             orderKey: state.orderKey,
+            order_id: state.orderId,
+            order_key: state.orderKey,
           };
 
-          // ✅ Debug: confirm exactly what we send to /payments
           console.log("[THIX YUNO] createPayment payload -> backend:", payload);
 
           const paymentRes = await createPayment(payload);
 
-          // ✅ Debug: confirm split data
           console.log("[THIX YUNO] /payments split response:", paymentRes?.split || "No split data");
 
           if (paymentRes?.handled) {
@@ -205,22 +205,18 @@ async function startYunoCheckout() {
             return;
           }
 
-
           // ✅ Source of truth (more reliable than yunoPaymentResult payload)
           state.lastPaymentStatus = paymentRes?.response?.status || "UNKNOWN";
-          state.lastPaymentId =
-            paymentRes?.payment_id || paymentRes?.response?.id || null;
+          state.lastPaymentId = paymentRes?.payment_id || paymentRes?.response?.id || null;
 
           console.log("[YUNO] createPayment ✅", paymentRes);
         } catch (e) {
           console.error("[YUNO] createPayment failed", e);
-          // allow retry
           state.paying = false;
           setPayButtonDisabled(false);
           setLoaderVisible(false);
           throw e;
         } finally {
-          // Continue SDK flow even if payment requires additional action
           yunoInstance.continuePayment();
         }
       },
@@ -243,18 +239,21 @@ async function startYunoCheckout() {
             paymentId,
           });
 
-          // Only confirm in order-pay context
           if (state.payForOrder && state.orderId) {
             const confirmRes = await confirmOrder({
+              // both formats (defensive)
               orderId: state.orderId,
               orderKey: state.orderKey,
+              order_id: state.orderId,
+              order_key: state.orderKey,
+
               status,
               paymentId,
+              payment_id: paymentId,
             });
 
             console.log("[YUNO] confirmOrder ✅", confirmRes);
 
-            // If approved, block further payments and redirect
             if (confirmRes?.ok && (status === "SUCCEEDED" || status === "VERIFIED")) {
               state.paid = true;
               setPayButtonDisabled(true);
@@ -264,18 +263,16 @@ async function startYunoCheckout() {
                 return;
               }
 
-              // ✅ fallback redirect if backend didn't send one
               fallbackRedirectToOrderReceived();
               return;
             }
 
-            // If rejected/failed, allow retry
+            // rejected/failed => allow retry
             state.paying = false;
             setPayButtonDisabled(false);
           }
         } catch (e) {
           console.error("[YUNO] confirmOrder error", e);
-          // allow retry
           state.paying = false;
           setPayButtonDisabled(false);
         } finally {
