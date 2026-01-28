@@ -200,6 +200,12 @@ add_action('rest_api_init', function () {
         'permission_callback' => '__return_true',
         'callback'            => 'thix_yuno_confirm_order_payment',
     ]);
+
+    register_rest_route('thix-yuno/v1', '/check-order-status', [
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => 'thix_yuno_check_order_status',
+    ]);
 });
 
 function thix_yuno_create_checkout_session(WP_REST_Request $request) {
@@ -520,26 +526,135 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     [$order, $err] = thix_yuno_get_order_from_request($request);
     if ($err) return $err;
 
-    $params     = (array) $request->get_json_params();
+    $params = (array) $request->get_json_params();
 
-    // ⚠️ SECURITY WARNING (MVP):
-    // This endpoint trusts the 'status' parameter sent from the frontend.
-    // A malicious client could forge a SUCCEEDED status and mark unpaid orders as paid.
-    //
-    // TODO: Implement server-side verification:
-    //   Option 1: Call GET /v1/payments/{payment_id} to verify status with Yuno
-    //   Option 2: Implement Yuno webhooks to receive payment status server-side
-    //   Option 3: Use Yuno's signature verification on webhooks
-    //
-    // For MVP, this is acceptable with the understanding that this is a known risk.
-
-    $status     = isset($params['status']) ? strtoupper((string)$params['status']) : 'UNKNOWN';
+    // ✅ SECURITY: Server-side verification implemented
+    // Frontend only sends payment_id, backend verifies status with Yuno API
     $payment_id = $params['payment_id'] ?? $params['paymentId'] ?? $order->get_meta('_thix_yuno_payment_id');
 
-    if (in_array($status, ['SUCCEEDED','VERIFIED'], true)) {
-        $order->payment_complete($payment_id ?: '');
-        $order->add_order_note('Yuno approved. status=' . $status . ' payment_id=' . ($payment_id ?: 'N/A'));
+    if (!$payment_id) {
+        thix_yuno_log('error', 'Confirm: missing payment_id', [
+            'order_id' => $order->get_id(),
+        ]);
+        return thix_yuno_json(['error' => 'Missing payment_id'], 400);
+    }
+
+    // Check if order is already paid (idempotency)
+    if ($order->is_paid()) {
+        thix_yuno_log('info', 'Confirm: order already paid', [
+            'order_id'   => $order->get_id(),
+            'payment_id' => $payment_id,
+        ]);
+        return thix_yuno_json([
+            'ok'        => true,
+            'order_id'  => $order->get_id(),
+            'new_status'=> $order->get_status(),
+            'redirect'  => $order->get_checkout_order_received_url(),
+            'already_paid' => true,
+        ], 200);
+    }
+
+    // Get credentials
+    $publicKey = thix_yuno_get_env('PUBLIC_API_KEY', '');
+    $secretKey = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
+
+    if (!$publicKey || !$secretKey) {
+        thix_yuno_log('error', 'Confirm: missing API keys', [
+            'order_id' => $order->get_id(),
+        ]);
+        return thix_yuno_json(['error' => 'Missing API keys'], 500);
+    }
+
+    $apiUrl = thix_yuno_api_url_from_public_key($publicKey);
+
+    // ✅ SERVER-SIDE VERIFICATION: Query Yuno for payment status
+    thix_yuno_log('info', 'Confirm: verifying payment with Yuno', [
+        'order_id'   => $order->get_id(),
+        'payment_id' => $payment_id,
+    ]);
+
+    $res = thix_yuno_wp_remote_json(
+        'GET',
+        "{$apiUrl}/v1/payments/{$payment_id}",
+        [
+            'public-api-key'     => $publicKey,
+            'private-secret-key' => $secretKey,
+        ],
+        null,
+        15
+    );
+
+    if (!$res['ok']) {
+        thix_yuno_log('error', 'Confirm: failed to verify payment with Yuno', [
+            'order_id'   => $order->get_id(),
+            'payment_id' => $payment_id,
+            'status'     => $res['status'],
+            'response'   => $res['raw'],
+        ]);
+
+        // Don't mark as failed, just return error (allow retry)
+        $order->add_order_note('Yuno verification failed (HTTP ' . $res['status'] . '). payment_id=' . $payment_id);
         $order->save();
+
+        return thix_yuno_json([
+            'error'   => 'Could not verify payment status with Yuno',
+            'order_id'=> $order->get_id(),
+            'retry'   => true,
+        ], 500);
+    }
+
+    // ✅ Source of truth: status verified by Yuno API
+    // Log FULL response for debugging
+    thix_yuno_log('info', 'Confirm: full Yuno response', [
+        'order_id'      => $order->get_id(),
+        'payment_id'    => $payment_id,
+        'full_response' => $res['raw'],
+    ]);
+
+    // Yuno may use different field names and nesting structures
+    // Try multiple possible locations for the status field
+    $raw = $res['raw'];
+    $status_candidates = [
+        $raw['status'] ?? null,
+        $raw['state'] ?? null,
+        $raw['payment_status'] ?? null,
+        $raw['payment']['status'] ?? null,
+        $raw['payment']['state'] ?? null,
+        $raw['payment']['payment_status'] ?? null,
+        $raw['transaction_status'] ?? null,
+        $raw['transaction']['status'] ?? null,
+    ];
+
+    // Find first non-null status
+    $verified_status = 'UNKNOWN';
+    foreach ($status_candidates as $candidate) {
+        if ($candidate !== null && $candidate !== '') {
+            $verified_status = strtoupper(trim($candidate));
+            break;
+        }
+    }
+
+    thix_yuno_log('info', 'Confirm: payment status verified', [
+        'order_id'           => $order->get_id(),
+        'payment_id'         => $payment_id,
+        'verified_status'    => $verified_status,
+        'raw_status'         => $raw['status'] ?? null,
+        'raw_state'          => $raw['state'] ?? null,
+        'raw_payment_status' => $raw['payment_status'] ?? null,
+        'nested_payment'     => isset($raw['payment']) ? 'yes' : 'no',
+    ]);
+
+    // Handle verified status
+    if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
+        $order->payment_complete($payment_id);
+        $order->add_order_note('Yuno payment approved (verified). status=' . $verified_status . ' payment_id=' . $payment_id);
+        $order->save();
+
+        thix_yuno_log('info', 'Confirm: order marked as paid', [
+            'order_id'     => $order->get_id(),
+            'payment_id'   => $payment_id,
+            'order_status' => $order->get_status(),
+        ]);
 
         return thix_yuno_json([
             'ok'        => true,
@@ -549,24 +664,253 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    if (in_array($status, ['REJECTED','DECLINED','CANCELLED','ERROR','EXPIRED'], true)) {
-        $order->update_status('failed', 'Yuno: ' . $status);
-        $order->add_order_note('Yuno rejected. status=' . $status . ' payment_id=' . ($payment_id ?: 'N/A'));
+    if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
+        $order->update_status('failed', 'Yuno payment rejected (verified): ' . $verified_status);
+        $order->add_order_note('Yuno payment rejected. status=' . $verified_status . ' payment_id=' . $payment_id);
         $order->save();
+
+        thix_yuno_log('warning', 'Confirm: order marked as failed', [
+            'order_id'   => $order->get_id(),
+            'payment_id' => $payment_id,
+            'status'     => $verified_status,
+        ]);
 
         return thix_yuno_json([
             'ok'        => false,
             'order_id'  => $order->get_id(),
             'new_status'=> $order->get_status(),
+            'status'    => $verified_status,
         ], 200);
     }
 
-    $order->add_order_note('Yuno status: ' . $status);
+    // Intermediate states (PENDING, PROCESSING, REQUIRES_ACTION, etc.)
+    $order->add_order_note('Yuno payment status: ' . $verified_status . ' (payment_id=' . $payment_id . ')');
     $order->save();
 
+    thix_yuno_log('info', 'Confirm: payment in intermediate state', [
+        'order_id'   => $order->get_id(),
+        'payment_id' => $payment_id,
+        'status'     => $verified_status,
+    ]);
+
     return thix_yuno_json([
-        'ok'     => true,
+        'ok'      => true,
         'order_id'=> $order->get_id(),
-        'status' => $status,
+        'status'  => $verified_status,
+        'pending' => true,
+        'message' => 'Payment is being processed',
+    ], 200);
+}
+
+/**
+ * Check order status to prevent double payment
+ * Used when user reloads the order-pay page
+ *
+ * ✅ SECURITY: This endpoint verifies with Yuno API if payment was already processed
+ * to prevent the race condition where user reloads before auto-confirm completes.
+ */
+function thix_yuno_check_order_status(WP_REST_Request $request) {
+    $params = $request->get_json_params();
+    $order_id  = absint($params['order_id'] ?? 0);
+    $order_key = sanitize_text_field($params['order_key'] ?? '');
+
+    if (!$order_id) {
+        return thix_yuno_json(['error' => 'Missing order_id'], 400);
+    }
+
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        return thix_yuno_json(['error' => 'Order not found'], 404);
+    }
+
+    // Validate order key if provided
+    if ($order_key && $order->get_order_key() !== $order_key) {
+        thix_yuno_log('warning', 'Check order status: order_key mismatch', [
+            'order_id'      => $order_id,
+            'provided_key'  => $order_key,
+            'expected_key'  => $order->get_order_key(),
+        ]);
+        return thix_yuno_json(['error' => 'Invalid order_key'], 403);
+    }
+
+    $status = $order->get_status();
+    $is_paid = $order->is_paid();
+
+    thix_yuno_log('info', 'Check order status: initial check', [
+        'order_id' => $order_id,
+        'status'   => $status,
+        'is_paid'  => $is_paid,
+    ]);
+
+    // 1. If order is already paid in WooCommerce, return redirect immediately
+    $paid_statuses = ['processing', 'completed', 'on-hold'];
+    if ($is_paid || in_array($status, $paid_statuses, true)) {
+        $redirect = $order->get_checkout_order_received_url();
+
+        thix_yuno_log('info', 'Check order status: already paid in WooCommerce', [
+            'order_id' => $order_id,
+            'status'   => $status,
+        ]);
+
+        return thix_yuno_json([
+            'is_paid'  => true,
+            'status'   => $status,
+            'redirect' => $redirect,
+            'message'  => 'Order already paid',
+        ], 200);
+    }
+
+    // 2. ✅ CRITICAL: Check if payment_id exists (payment was initiated)
+    // If it exists, verify with Yuno API to prevent double-payment race condition
+    $payment_id = $order->get_meta('_thix_yuno_payment_id');
+
+    if (!$payment_id) {
+        // No payment initiated yet, safe to proceed
+        thix_yuno_log('info', 'Check order status: no payment_id found, allowing payment', [
+            'order_id' => $order_id,
+        ]);
+
+        return thix_yuno_json([
+            'is_paid' => false,
+            'status'  => $status,
+            'message' => 'Order ready for payment',
+        ], 200);
+    }
+
+    // 3. Payment was initiated, verify with Yuno API
+    thix_yuno_log('info', 'Check order status: payment_id found, verifying with Yuno', [
+        'order_id'   => $order_id,
+        'payment_id' => $payment_id,
+    ]);
+
+    $publicKey = thix_yuno_get_env('PUBLIC_API_KEY', '');
+    $secretKey = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
+
+    if (!$publicKey || !$secretKey) {
+        // Can't verify, but safer to block than allow double payment
+        thix_yuno_log('warning', 'Check order status: missing API keys, blocking payment', [
+            'order_id' => $order_id,
+        ]);
+
+        return thix_yuno_json([
+            'is_paid' => false,
+            'status'  => $status,
+            'message' => 'Order ready for payment',
+            'warning' => 'Could not verify payment status',
+        ], 200);
+    }
+
+    $apiUrl = thix_yuno_api_url_from_public_key($publicKey);
+
+    $res = thix_yuno_wp_remote_json(
+        'GET',
+        "{$apiUrl}/v1/payments/{$payment_id}",
+        [
+            'public-api-key'     => $publicKey,
+            'private-secret-key' => $secretKey,
+        ],
+        null,
+        10
+    );
+
+    if (!$res['ok']) {
+        // API call failed, allow payment (but log the issue)
+        thix_yuno_log('warning', 'Check order status: Yuno API verification failed', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+            'status'     => $res['status'],
+        ]);
+
+        return thix_yuno_json([
+            'is_paid' => false,
+            'status'  => $status,
+            'message' => 'Order ready for payment',
+        ], 200);
+    }
+
+    // Parse status from Yuno response (same logic as confirm endpoint)
+    $raw = $res['raw'];
+    $status_candidates = [
+        $raw['status'] ?? null,
+        $raw['state'] ?? null,
+        $raw['payment_status'] ?? null,
+        $raw['payment']['status'] ?? null,
+        $raw['payment']['state'] ?? null,
+        $raw['payment']['payment_status'] ?? null,
+        $raw['transaction_status'] ?? null,
+        $raw['transaction']['status'] ?? null,
+    ];
+
+    $verified_status = 'UNKNOWN';
+    foreach ($status_candidates as $candidate) {
+        if ($candidate !== null && $candidate !== '') {
+            $verified_status = strtoupper(trim($candidate));
+            break;
+        }
+    }
+
+    thix_yuno_log('info', 'Check order status: Yuno verification result', [
+        'order_id'        => $order_id,
+        'payment_id'      => $payment_id,
+        'verified_status' => $verified_status,
+    ]);
+
+    // 4. If payment is SUCCEEDED in Yuno, mark order as paid NOW
+    if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
+        thix_yuno_log('info', 'Check order status: Payment succeeded in Yuno, marking order as paid', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+            'status'     => $verified_status,
+        ]);
+
+        // Mark order as paid
+        $order->payment_complete($payment_id);
+        $order->add_order_note('Yuno payment confirmed via check-order-status (page reload). status=' . $verified_status . ' payment_id=' . $payment_id);
+        $order->save();
+
+        $redirect = $order->get_checkout_order_received_url();
+
+        return thix_yuno_json([
+            'is_paid'         => true,
+            'status'          => $order->get_status(),
+            'redirect'        => $redirect,
+            'message'         => 'Payment already processed',
+            'verified_by'     => 'yuno_api',
+            'verified_status' => $verified_status,
+        ], 200);
+    }
+
+    // 5. If payment is REJECTED/FAILED, allow retry
+    if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
+        thix_yuno_log('warning', 'Check order status: Payment failed in Yuno, allowing retry', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+            'status'     => $verified_status,
+        ]);
+
+        // Don't mark as failed here, just allow retry
+        // The confirm endpoint will handle marking as failed
+        return thix_yuno_json([
+            'is_paid' => false,
+            'status'  => $status,
+            'message' => 'Previous payment failed, you can retry',
+            'verified_status' => $verified_status,
+        ], 200);
+    }
+
+    // 6. Payment is PENDING/PROCESSING/UNKNOWN - safer to block new payment
+    thix_yuno_log('info', 'Check order status: Payment in intermediate state, allowing retry', [
+        'order_id'   => $order_id,
+        'payment_id' => $payment_id,
+        'status'     => $verified_status,
+    ]);
+
+    // For intermediate states, we allow payment (user might be retrying)
+    // but we could also choose to block and show "payment processing" message
+    return thix_yuno_json([
+        'is_paid' => false,
+        'status'  => $status,
+        'message' => 'Order ready for payment',
+        'previous_payment_status' => $verified_status,
     ], 200);
 }

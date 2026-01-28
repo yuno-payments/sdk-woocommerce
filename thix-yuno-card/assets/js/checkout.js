@@ -109,6 +109,38 @@ async function startYunoCheckout() {
 
     guardContext();
 
+    // ✅ IMPORTANT: Check if order is already paid before allowing payment
+    // This prevents double-charge when user refreshes the page
+    if (state.payForOrder && state.orderId) {
+      try {
+        const checkRes = await fetch(`${window.THIX_YUNO_WC?.restBase}/check-order-status`, {
+          method: "POST",
+          headers: {
+            "X-WP-Nonce": window.THIX_YUNO_WC?.nonce,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            order_id: state.orderId,
+            order_key: state.orderKey,
+          }),
+        });
+
+        if (checkRes.ok) {
+          const orderStatus = await checkRes.json();
+          console.log("[YUNO] Order status check:", orderStatus);
+
+          if (orderStatus.is_paid || ['processing', 'completed', 'on-hold'].includes(orderStatus.status)) {
+            console.warn("[YUNO] ⚠️ Order already paid/processing, redirecting to order-received");
+            alert("This order has already been paid.");
+            window.location.href = orderStatus.redirect || fallbackRedirectToOrderReceived();
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("[YUNO] Could not check order status, continuing:", e);
+      }
+    }
+
     const ok = await waitForYunoSdk();
     if (!ok) {
       console.error("[YUNO] SDK not available (Yuno.initialize missing). Check yuno-sdk script.");
@@ -147,6 +179,8 @@ async function startYunoCheckout() {
 
     let isPayingInsideSdk = false;
     setLoaderVisible(true);
+
+    console.log("[YUNO] ===== Starting SDK checkout with callbacks =====");
 
     await yunoInstance.startCheckout({
       checkoutSession: state.checkoutSession,
@@ -194,10 +228,11 @@ async function startYunoCheckout() {
             order_key: state.orderKey,
           };
 
-          console.log("[THIX YUNO] createPayment payload -> backend:", payload);
+          console.log("[THIX YUNO] ===== createPayment CALLED ===== payload:", payload);
 
           const paymentRes = await createPayment(payload);
 
+          console.log("[THIX YUNO] ===== createPayment RESPONSE ===== Full response:", paymentRes);
           console.log("[THIX YUNO] /payments split response:", paymentRes?.split || "No split data");
 
           if (paymentRes?.handled) {
@@ -209,7 +244,83 @@ async function startYunoCheckout() {
           state.lastPaymentStatus = paymentRes?.response?.status || "UNKNOWN";
           state.lastPaymentId = paymentRes?.payment_id || paymentRes?.response?.id || null;
 
-          console.log("[YUNO] createPayment ✅", paymentRes);
+          console.log("[YUNO] ===== SAVED TO STATE =====", {
+            lastPaymentStatus: state.lastPaymentStatus,
+            lastPaymentId: state.lastPaymentId,
+          });
+
+          if (!state.lastPaymentId) {
+            console.error("[YUNO] ❌ CRITICAL: payment_id not found in response!", {
+              payment_id_field: paymentRes?.payment_id,
+              response_id_field: paymentRes?.response?.id,
+              full_response: paymentRes,
+            });
+            alert("ERROR: No payment_id in backend response!");
+          }
+
+          // ✅ WORKAROUND: Auto-confirm if payment is already SUCCEEDED
+          // This handles cases where yunoPaymentResult callback doesn't fire
+          if (state.lastPaymentStatus === "SUCCEEDED" && state.lastPaymentId) {
+            console.log("[YUNO] 🔄 Payment SUCCEEDED, scheduling auto-confirm with retry...");
+
+            const attemptConfirm = async (attemptNumber = 1, maxAttempts = 3) => {
+              if (state.paid) {
+                console.log("[YUNO] Already confirmed, skipping auto-confirm");
+                return;
+              }
+
+              const delay = attemptNumber === 1 ? 5000 : 3000; // 5s first, then 3s
+              console.log(`[YUNO] 🤖 Auto-confirm attempt ${attemptNumber}/${maxAttempts} in ${delay/1000}s...`);
+
+              setTimeout(async () => {
+                if (state.paid) {
+                  console.log("[YUNO] Already confirmed during wait");
+                  return;
+                }
+
+                try {
+                  const confirmRes = await confirmOrder({
+                    orderId: state.orderId,
+                    orderKey: state.orderKey,
+                    order_id: state.orderId,
+                    order_key: state.orderKey,
+                    paymentId: state.lastPaymentId,
+                    payment_id: state.lastPaymentId,
+                  });
+
+                  console.log(`[YUNO] ===== AUTO-CONFIRM RESPONSE (attempt ${attemptNumber}) ✅ =====`, confirmRes);
+
+                  if (confirmRes?.ok && !confirmRes?.pending) {
+                    state.paid = true;
+                    setPayButtonDisabled(true);
+                    yunoInstance.hideLoader();
+
+                    if (confirmRes?.redirect) {
+                      console.log("[YUNO] Redirecting to:", confirmRes.redirect);
+                      window.location.href = confirmRes.redirect;
+                    } else {
+                      fallbackRedirectToOrderReceived();
+                    }
+                  } else if (confirmRes?.pending && attemptNumber < maxAttempts) {
+                    // Yuno still processing, retry
+                    console.warn(`[YUNO] ⏳ Still pending, retrying (${attemptNumber}/${maxAttempts})...`);
+                    attemptConfirm(attemptNumber + 1, maxAttempts);
+                  } else if (confirmRes?.pending) {
+                    console.error("[YUNO] ❌ Max retries reached, payment still pending");
+                    alert("Payment is taking longer than expected. Please refresh the page.");
+                  }
+                } catch (e) {
+                  console.error(`[YUNO] Auto-confirm attempt ${attemptNumber} failed:`, e);
+                  if (attemptNumber < maxAttempts) {
+                    console.log("[YUNO] Retrying...");
+                    attemptConfirm(attemptNumber + 1, maxAttempts);
+                  }
+                }
+              }, delay);
+            };
+
+            attemptConfirm();
+          }
         } catch (e) {
           console.error("[YUNO] createPayment failed", e);
           state.paying = false;
@@ -226,20 +337,44 @@ async function startYunoCheckout() {
        * We confirm the Woo order based on what our backend returned from /payments
        */
       yunoPaymentResult: async (result) => {
-        console.log("[YUNO] yunoPaymentResult ✅", result);
+        console.log("[YUNO] ===== yunoPaymentResult CALLED ✅ =====", result);
+        console.log("[YUNO] State before confirm:", {
+          lastPaymentId: state.lastPaymentId,
+          lastPaymentStatus: state.lastPaymentStatus,
+          payForOrder: state.payForOrder,
+          orderId: state.orderId,
+          paid: state.paid,
+        });
+
+        // Prevent double confirmation
+        if (state.paid) {
+          console.log("[YUNO] ⏭️  Already confirmed, skipping yunoPaymentResult");
+          return;
+        }
 
         try {
-          const status = state.lastPaymentStatus || "UNKNOWN";
           const paymentId = state.lastPaymentId || null;
 
           console.log("[YUNO] confirm payload", {
             orderId: state.orderId,
             orderKey: state.orderKey,
-            status,
             paymentId,
           });
 
+          // DEBUG: Check if payment_id exists
+          if (!paymentId) {
+            console.error("[YUNO] ❌ CRITICAL: Missing payment_id! Cannot confirm order.", {
+              lastPaymentStatus: state.lastPaymentStatus,
+              lastPaymentId: state.lastPaymentId,
+            });
+            alert("ERROR: No payment_id found. Check console.");
+            return;
+          }
+
           if (state.payForOrder && state.orderId) {
+            console.log("[YUNO] Calling confirmOrder API...");
+
+            // ✅ SECURITY: Only send payment_id, backend verifies status with Yuno
             const confirmRes = await confirmOrder({
               // both formats (defensive)
               orderId: state.orderId,
@@ -247,32 +382,57 @@ async function startYunoCheckout() {
               order_id: state.orderId,
               order_key: state.orderKey,
 
-              status,
               paymentId,
               payment_id: paymentId,
             });
 
-            console.log("[YUNO] confirmOrder ✅", confirmRes);
+            console.log("[YUNO] ===== confirmOrder RESPONSE ✅ =====", confirmRes);
+            console.log("[YUNO] Response analysis:", {
+              ok: confirmRes?.ok,
+              pending: confirmRes?.pending,
+              redirect: confirmRes?.redirect,
+              status: confirmRes?.status,
+              new_status: confirmRes?.new_status,
+            });
 
-            if (confirmRes?.ok && (status === "SUCCEEDED" || status === "VERIFIED")) {
+            // Handle response based on backend verification
+            if (confirmRes?.ok && !confirmRes?.pending) {
+              console.log("[YUNO] ✅ Payment confirmed! Redirecting...");
               state.paid = true;
               setPayButtonDisabled(true);
 
               if (confirmRes?.redirect) {
+                console.log("[YUNO] Redirecting to:", confirmRes.redirect);
                 window.location.href = confirmRes.redirect;
                 return;
               }
 
+              console.log("[YUNO] No redirect URL, using fallback");
               fallbackRedirectToOrderReceived();
               return;
             }
 
-            // rejected/failed => allow retry
+            // Handle pending status (payment processing)
+            if (confirmRes?.pending) {
+              console.warn("[YUNO] ⏳ Payment is being processed", confirmRes);
+              alert("Payment is being processed. Please wait.");
+              // Could show a "processing" message to user here
+              // For now, allow retry
+            }
+
+            // rejected/failed or pending => allow retry
+            console.warn("[YUNO] Payment not confirmed, allowing retry");
             state.paying = false;
             setPayButtonDisabled(false);
+          } else {
+            console.error("[YUNO] ❌ Missing context:", {
+              payForOrder: state.payForOrder,
+              orderId: state.orderId,
+            });
           }
         } catch (e) {
-          console.error("[YUNO] confirmOrder error", e);
+          console.error("[YUNO] ===== confirmOrder ERROR ❌ =====", e);
+          alert("Error confirming payment: " + e.message);
           state.paying = false;
           setPayButtonDisabled(false);
         } finally {

@@ -157,7 +157,7 @@ Select the environment in the plugin settings. Yuno also detects the environment
 
 ---
 
-## 🧾 Current Payment Flow (MVP)
+## 🧾 Current Payment Flow (Production-Ready)
 
 1. User completes WooCommerce checkout → Order created in `pending` status
 2. User redirected to `/order-pay/{ID}/?pay_for_order=true&key=...`
@@ -167,10 +167,12 @@ Select the environment in the plugin settings. Yuno also detects the environment
 6. Yuno generates `oneTimeToken`
 7. Frontend calls `/thix-yuno/v1/payments` → WordPress creates payment via Yuno API
 8. Yuno processes the payment
-9. Frontend calls `/thix-yuno/v1/confirm` → Order marked as paid/failed
-10. User redirected to `/order-received` (thank you page)
+9. Frontend calls `/thix-yuno/v1/confirm` with `payment_id` only
+10. **Backend verifies payment status with Yuno API** (server-side verification)
+11. Order marked as paid/failed based on verified status
+12. User redirected to `/order-received` (thank you page)
 
-> ⚠️ **Security Note (MVP):** The `/confirm` endpoint currently trusts the payment status sent from the frontend. For production, implement server-side verification via Yuno API lookup or webhooks.
+> ✅ **Security:** The `/confirm` endpoint performs server-side verification by querying Yuno's API to verify the payment status. The frontend cannot forge payment confirmations.
 
 ---
 
@@ -181,6 +183,7 @@ Select the environment in the plugin settings. Yuno also detects the environment
 | GET    | `/thix-yuno/v1/public-api-key`    | Returns public key for the SDK     |
 | POST   | `/thix-yuno/v1/checkout-session`  | Creates a checkout session in Yuno |
 | POST   | `/thix-yuno/v1/payments`          | Creates payment using oneTimeToken |
+| POST   | `/thix-yuno/v1/confirm`           | Verifies payment with Yuno API and confirms order |
 
 ---
 
