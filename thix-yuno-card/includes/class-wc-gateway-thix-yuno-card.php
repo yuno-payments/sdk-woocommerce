@@ -8,15 +8,12 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     $this->method_title       = 'Card (Yuno)';
     $this->method_description = 'Card payment using Yuno';
 
-    // ✅ No fields in checkout (we pay on order-pay page)
     $this->has_fields = false;
-
     $this->supports = ['products'];
 
     $this->init_form_fields();
     $this->init_settings();
 
-    // ✅ Force safe string title (avoid null → KSES/preg_replace deprecations in PHP 8.2)
     $title = $this->get_option('title', 'Yuno Card');
     $this->title = (is_string($title) && $title !== '') ? $title : 'Yuno Card';
 
@@ -24,17 +21,10 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     $this->enabled = ($enabled === 'yes') ? 'yes' : 'no';
 
     add_action('woocommerce_update_options_payment_gateways_' . $this->id, [$this, 'process_admin_options']);
-
-    // ✅ Render on order-pay (receipt page)
     add_action('woocommerce_receipt_' . $this->id, [$this, 'receipt_page']);
-
-    // ✅ Load scripts only where needed
     add_action('wp_enqueue_scripts', [$this, 'enqueue_scripts']);
   }
 
-  /**
-   * ✅ Safety: never return null title (prevents KSES deprecations / DOM contamination)
-   */
   public function get_title() {
     $t = isset($this->title) ? (string) $this->title : '';
     return $t !== '' ? $t : 'Yuno Card';
@@ -89,8 +79,8 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'default'     => '',
         'desc_tip'    => true,
       ],
-         
-    // ✅ Split (Phase 1)
+
+      // ✅ Split (MVP)
       'split_enabled' => [
         'title'       => 'Split Payments',
         'type'        => 'checkbox',
@@ -99,16 +89,27 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'description' => 'If enabled, the plugin will include split_marketplace data when creating the payment.',
       ],
       'yuno_recipient_id' => [
-        'title'       => 'Yuno Recipient ID',
+        'title'       => 'Yuno Recipient ID (Seller)',
         'type'        => 'text',
-        'description' => 'Recipient ID created in Yuno (NOT provider recipient ID). Required when Split is enabled.',
+        'description' => 'Recipient ID created in Yuno for the seller/publisher (NOT provider recipient ID). Required when Split is enabled.',
         'default'     => '',
         'desc_tip'    => true,
       ],
-      'split_fixed_amount' => [
-        'title'       => 'Fixed Split Amount (minor units)',
+
+      // ✅ Nuevo recomendado: comisión %
+      'split_commission_percent' => [
+        'title'       => 'Commission % (Platform)',
         'type'        => 'text',
-        'description' => 'Fixed split amount in minor units. Example: COP=1000 means $1.000 COP. Required when Split is enabled.',
+        'description' => 'Commission percentage over the FINAL order total (incl. taxes/shipping). Example: 15 or 15.5. Use 0 for passthrough (100% seller). If set, it overrides Fixed Commission Amount.',
+        'default'     => '',
+        'desc_tip'    => true,
+      ],
+
+      // Legacy/MVP: comisión fija minor units
+      'split_fixed_amount' => [
+        'title'       => 'Fixed Commission Amount (minor units)',
+        'type'        => 'text',
+        'description' => 'Platform commission in minor units. Example: COP=1000 means $1.000 COP commission. Use 0 for passthrough (100% seller). Ignored if Commission % is set.',
         'default'     => '',
         'desc_tip'    => true,
       ],
@@ -125,42 +126,58 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
 
   public function process_admin_options() {
     $saved = parent::process_admin_options();
-  
-    // Reload saved settings
+
     $split_enabled = $this->get_option('split_enabled', 'no') === 'yes';
     $recipient_id  = trim((string) $this->get_option('yuno_recipient_id', ''));
-    $fixed_amount  = trim((string) $this->get_option('split_fixed_amount', ''));
-  
+
+    $pct_raw = trim((string) $this->get_option('split_commission_percent', ''));
+    $fixed_raw = trim((string) $this->get_option('split_fixed_amount', ''));
+
     if ($split_enabled) {
       $errors = [];
-  
+
       if ($recipient_id === '') {
         $errors[] = 'Yuno Recipient ID is required when Split is enabled.';
       }
-  
-      // fixed_amount must be an integer >= 1
-      if ($fixed_amount === '' || !ctype_digit($fixed_amount) || (int)$fixed_amount <= 0) {
-        $errors[] = 'Fixed Split Amount must be a positive integer (minor units) when Split is enabled.';
+
+      $has_pct = ($pct_raw !== '');
+      $has_fixed = ($fixed_raw !== '');
+
+      if (!$has_pct && !$has_fixed) {
+        $errors[] = 'When Split is enabled you must set either Commission % or Fixed Commission Amount.';
       }
-  
+
+      if ($has_pct) {
+        $pct = (float) str_replace(',', '.', $pct_raw);
+        if ($pct < 0 || $pct > 100) {
+          $errors[] = 'Commission % must be between 0 and 100.';
+        }
+      }
+
+      if (!$has_pct && $has_fixed) {
+        // fixed must be integer >= 0
+        if (!ctype_digit($fixed_raw)) {
+          $errors[] = 'Fixed Commission Amount must be an integer (minor units).';
+        } else if ((int)$fixed_raw < 0) {
+          $errors[] = 'Fixed Commission Amount must be >= 0.';
+        }
+      }
+
       if (!empty($errors)) {
         foreach ($errors as $msg) {
-          // Show error in admin
           WC_Admin_Settings::add_error($msg);
         }
-  
-        // ✅ Fail-safe: disable split to avoid leaving invalid config active
+
+        // Fail-safe: disable split to avoid leaving invalid config active
         $this->update_option('split_enabled', 'no');
         WC_Admin_Settings::add_error('Split was automatically disabled due to invalid configuration.');
-  
-        // Refresh in-memory
+
         $this->init_settings();
       }
     }
-  
+
     return $saved;
   }
-  
 
   /**
    * Settings helpers for rest-api.php
@@ -179,7 +196,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
   public function is_available() {
     if ('yes' !== $this->enabled) return false;
 
-    // Optional: hide gateway if keys missing
     $account = (string) $this->get_option('account_code', '');
     $pub     = (string) $this->get_option('public_api_key', '');
     $priv    = (string) $this->get_option('private_secret_key', '');
@@ -189,9 +205,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     return true;
   }
 
-  /**
-   * ✅ Place order → send user to order-pay where we mount Yuno
-   */
   public function process_payment($order_id) {
     $order = wc_get_order($order_id);
 
@@ -202,14 +215,12 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       ];
     }
 
-    // Ensure "pending payment"
     if ($order->get_status() !== 'pending') {
       $order->update_status('pending', 'Awaiting Yuno payment');
     } else {
       $order->add_order_note('Awaiting Yuno payment');
     }
 
-    // Recommended: hold stock
     wc_reduce_stock_levels($order_id);
 
     return [
@@ -218,9 +229,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     ];
   }
 
-  /**
-   * ✅ order-pay page (receipt)
-   */
   public function receipt_page($order_id) {
     $order = wc_get_order($order_id);
 
@@ -253,9 +261,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     echo '</div>';
   }
 
-  /**
-   * ✅ Load scripts ONLY on order-pay and ONLY for this gateway order
-   */
   public function enqueue_scripts() {
     if (!function_exists('is_checkout_pay_page') || !is_checkout_pay_page()) return;
 
@@ -292,7 +297,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       true
     );
 
-    // ✅ Force type="module" only once
     static $module_filter_added = false;
     if (!$module_filter_added) {
       $module_filter_added = true;
