@@ -159,15 +159,18 @@ Select the environment in the plugin settings. Yuno also detects the environment
 
 ## 🧾 Current Payment Flow (MVP)
 
-1. User enters checkout
-2. Yuno SDK initializes
-3. `checkout_session` is created from the cart
-4. User enters card details
-5. Yuno generates `oneTimeToken`
-6. WordPress creates payment via Yuno API
-7. Yuno processes the payment
+1. User completes WooCommerce checkout → Order created in `pending` status
+2. User redirected to `/order-pay/{ID}/?pay_for_order=true&key=...`
+3. Yuno SDK initializes on order-pay page
+4. `checkout_session` is created from existing WooCommerce order
+5. User enters card details in Yuno SDK modal
+6. Yuno generates `oneTimeToken`
+7. Frontend calls `/thix-yuno/v1/payments` → WordPress creates payment via Yuno API
+8. Yuno processes the payment
+9. Frontend calls `/thix-yuno/v1/confirm` → Order marked as paid/failed
+10. User redirected to `/order-received` (thank you page)
 
-> ⚠️ **Note:** Currently the payment is processed before creating the final WooCommerce order (MVP behavior).
+> ⚠️ **Security Note (MVP):** The `/confirm` endpoint currently trusts the payment status sent from the frontend. For production, implement server-side verification via Yuno API lookup or webhooks.
 
 ---
 

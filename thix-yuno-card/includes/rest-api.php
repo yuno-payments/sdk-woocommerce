@@ -73,6 +73,14 @@ function thix_yuno_wp_remote_json($method, $url, $headers = [], $body = null, $t
     $rawBody = wp_remote_retrieve_body($resp);
     $json    = json_decode($rawBody, true);
 
+    // Log Yuno HTTP response for debugging
+    thix_yuno_log('debug', 'Yuno HTTP response', [
+        'method' => $method,
+        'url'    => $url,
+        'status' => $status,
+        'body'   => $json ?? $rawBody,
+    ]);
+
     return [
         'ok'     => ($status >= 200 && $status < 300),
         'status' => $status,
@@ -387,6 +395,9 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
         }
     }
 
+    // Calculate seller_amount for logging and payload construction
+    $seller_amount = $split_enabled ? round($amount_value - $commission_amount, $decimals) : null;
+
     thix_yuno_log('info', 'payments amount (woo -> yuno)', [
         'order_id'         => $order->get_id(),
         'currency'         => $currency,
@@ -396,6 +407,7 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
         'split_enabled'    => $split_enabled,
         'commission_mode'  => $commission_mode,
         'commission_amount'=> ($split_enabled ? $commission_amount : null),
+        'seller_amount'    => $seller_amount,
         'recipient_id'     => ($split_enabled ? $recipient_id : null),
         'idempotency_key'  => $idempotencyKey,
     ]);
@@ -421,7 +433,7 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
 
     // Split payload (major units)
     if ($split_enabled) {
-        $seller_amount = round($amount_value - $commission_amount, $decimals);
+        // seller_amount already calculated above for logging
 
         $payload['split_marketplace'] = [
             [
@@ -471,9 +483,15 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     delete_transient($lockKey);
 
     if (!$res['ok']) {
-        $order->add_order_note('Yuno payment failed: ' . (is_string($res['raw']) ? $res['raw'] : wp_json_encode($res['raw'])));
-        $order->update_status('failed');
+        // Only add note, do NOT mark failed (allow retries)
+        $order->add_order_note('Yuno payment error: ' . (is_string($res['raw']) ? $res['raw'] : wp_json_encode($res['raw'])));
         $order->save();
+
+        thix_yuno_log('warning', 'Yuno payment creation failed (order remains pending for retry)', [
+            'order_id' => $order->get_id(),
+            'status'   => $res['status'],
+            'response' => $res['raw'],
+        ]);
 
         return thix_yuno_json([
             'error'    => 'Yuno create payment failed',
@@ -503,6 +521,18 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     if ($err) return $err;
 
     $params     = (array) $request->get_json_params();
+
+    // ⚠️ SECURITY WARNING (MVP):
+    // This endpoint trusts the 'status' parameter sent from the frontend.
+    // A malicious client could forge a SUCCEEDED status and mark unpaid orders as paid.
+    //
+    // TODO: Implement server-side verification:
+    //   Option 1: Call GET /v1/payments/{payment_id} to verify status with Yuno
+    //   Option 2: Implement Yuno webhooks to receive payment status server-side
+    //   Option 3: Use Yuno's signature verification on webhooks
+    //
+    // For MVP, this is acceptable with the understanding that this is a known risk.
+
     $status     = isset($params['status']) ? strtoupper((string)$params['status']) : 'UNKNOWN';
     $payment_id = $params['payment_id'] ?? $params['paymentId'] ?? $order->get_meta('_thix_yuno_payment_id');
 
