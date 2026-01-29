@@ -45,10 +45,10 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'default'     => 'Yuno Card',
         'desc_tip'    => true,
       ],
-      'account_code' => [
-        'title'       => 'ACCOUNT_CODE',
+      'account_id' => [
+        'title'       => 'ACCOUNT_ID',
         'type'        => 'text',
-        'description' => 'Yuno account code.',
+        'description' => 'Yuno account ID.',
         'default'     => '',
         'desc_tip'    => true,
       ],

@@ -11,7 +11,7 @@ function thix_yuno_get_env($key, $default = '') {
     $settings = get_option('woocommerce_thix_yuno_card_settings', []);
     if (is_array($settings)) {
         $map = [
-            'ACCOUNT_CODE'           => 'account_code',
+            'ACCOUNT_ID'             => 'account_id',
             'PUBLIC_API_KEY'         => 'public_api_key',
             'PRIVATE_SECRET_KEY'     => 'private_secret_key',
             'DEBUG'                  => 'debug',
@@ -209,7 +209,7 @@ add_action('rest_api_init', function () {
 });
 
 function thix_yuno_create_checkout_session(WP_REST_Request $request) {
-    $accountCode = thix_yuno_get_env('ACCOUNT_CODE', '');
+    $accountCode = thix_yuno_get_env('ACCOUNT_ID', '');
     $publicKey   = thix_yuno_get_env('PUBLIC_API_KEY', '');
     $secretKey   = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
 
@@ -304,7 +304,7 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
 }
 
 function thix_yuno_create_payment(WP_REST_Request $request) {
-    $accountCode = thix_yuno_get_env('ACCOUNT_CODE', '');
+    $accountCode = thix_yuno_get_env('ACCOUNT_ID', '');
     $publicKey   = thix_yuno_get_env('PUBLIC_API_KEY', '');
     $secretKey   = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
 
