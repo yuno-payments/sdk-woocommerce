@@ -45,6 +45,19 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'default'     => 'Yuno Card',
         'desc_tip'    => true,
       ],
+      'environment' => [
+        'title'       => 'Environment',
+        'type'        => 'select',
+        'description' => 'Select the Yuno environment. Sandbox/Dev allows HTTP for local development.',
+        'default'     => 'sandbox',
+        'desc_tip'    => true,
+        'options'     => [
+          'sandbox' => 'Sandbox',
+          'prod'    => 'Production',
+          'staging' => 'Staging',
+          'dev'     => 'Dev',
+        ],
+      ],
       'account_id' => [
         'title'       => 'ACCOUNT_ID',
         'type'        => 'text',
@@ -183,13 +196,34 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
   public function is_available() {
     if ('yes' !== $this->enabled) return false;
 
-    $account = (string) $this->get_option('account_code', '');
+    $account = (string) $this->get_option('account_id', '');
     $pub     = (string) $this->get_option('public_api_key', '');
     $priv    = (string) $this->get_option('private_secret_key', '');
 
     if ($account === '' || $pub === '' || $priv === '') return false;
 
+    // SSL check: only enforce HTTPS in production/staging environments
+    $environment = (string) $this->get_option('environment', 'sandbox');
+    if (in_array($environment, ['prod', 'staging'], true)) {
+      if (!is_ssl() && !$this->is_local_development()) {
+        return false;
+      }
+    }
+
     return true;
+  }
+
+  /**
+   * Check if we're in local development environment
+   */
+  private function is_local_development() {
+    $host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '';
+    return (
+      strpos($host, 'localhost') !== false ||
+      strpos($host, '127.0.0.1') !== false ||
+      strpos($host, '.local') !== false ||
+      strpos($host, '.test') !== false
+    );
   }
 
   public function process_payment($order_id) {
@@ -220,7 +254,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     $order = wc_get_order($order_id);
 
     if (!$order) {
-      echo '<p>' . esc_html__('Order not found.', 'thix-yuno') . '</p>';
+      echo '<p>' . esc_html__('Order not found.', 'yuno-sdk-woocommerce') . '</p>';
       return;
     }
 
@@ -228,21 +262,21 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     $total_html   = wp_kses_post($order->get_formatted_order_total());
 
     echo '<div class="thix-yuno-receipt">';
-    echo '<h3>' . esc_html__('Pay with Yuno', 'thix-yuno') . '</h3>';
-    echo '<p>' . esc_html__('Order', 'thix-yuno') . ' #' . esc_html($order_number) . ' — ' .
-         esc_html__('Total', 'thix-yuno') . ': <strong>' . $total_html . '</strong></p>';
+    echo '<h3>' . esc_html__('Pay with Yuno', 'yuno-sdk-woocommerce') . '</h3>';
+    echo '<p>' . esc_html__('Order', 'yuno-sdk-woocommerce') . ' #' . esc_html($order_number) . ' — ' .
+         esc_html__('Total', 'yuno-sdk-woocommerce') . ': <strong>' . $total_html . '</strong></p>';
 
-    echo '<div id="loader" style="display:none; margin:12px 0;">' . esc_html__('Loading Yuno…', 'thix-yuno') . '</div>';
+    echo '<div id="loader" style="display:none; margin:12px 0;">' . esc_html__('Loading Yuno…', 'yuno-sdk-woocommerce') . '</div>';
     echo '<div id="root"></div>';
     echo '<div id="form-element"></div>';
     echo '<div id="action-form-element"></div>';
 
     echo '<button type="button" id="button-pay" style="margin-top:12px; padding:10px 14px;">' .
-         esc_html__('Pay Now', 'thix-yuno') .
+         esc_html__('Pay Now', 'yuno-sdk-woocommerce') .
          '</button>';
 
     echo '<p style="margin-top:10px; opacity:.7;">' .
-         esc_html__('Do not close this page until the payment finishes.', 'thix-yuno') .
+         esc_html__('Do not close this page until the payment finishes.', 'yuno-sdk-woocommerce') .
          '</p>';
 
     echo '</div>';

@@ -1,7 +1,7 @@
 {
-  "name": "thinx-yuno-wc",
+  "name": "yuno-sdk-woocommerce",
   "version": "1.0.0",
-  "description": "",
+  "description": "Yuno SDK for WooCommerce - Accept card payments via Yuno with server-side verification",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

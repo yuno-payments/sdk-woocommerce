@@ -46,7 +46,7 @@ WordPress REST API (rest-api.php)
 ## 📁 Plugin Structure
 
 ```
-thix-yuno-card/
+yuno-sdk-woocommerce/
 │
 ├── assets/
 │   └── js/
@@ -57,7 +57,7 @@ thix-yuno-card/
 │   ├── class-wc-gateway-thix-yuno-card.php  # WooCommerce Gateway class
 │   └── rest-api.php            # REST endpoints (checkout / payments)
 │
-└── thix-yuno-card.php          # Plugin bootstrap
+└── yuno-sdk-woocommerce.php    # Plugin bootstrap
 ```
 
 ---
@@ -68,7 +68,7 @@ thix-yuno-card/
 
 1. Clone the repository into:
    ```bash
-   wp-content/plugins/thix-yuno-card
+   wp-content/plugins/yuno-sdk-woocommerce
    ```
 
 2. Activate the plugin from WordPress Admin
@@ -114,8 +114,9 @@ WooCommerce → Settings → Payments → Card (Yuno)
 |---------|-------------|
 | **Enable** | Enable/disable the payment method |
 | **Checkout Title** | Name displayed to users at checkout |
+| **Environment** | Select Yuno environment: Sandbox, Production, Staging, or Dev. Sandbox/Dev allows HTTP for local development. |
 | **ACCOUNT_ID** | Your Yuno account ID |
-| **PUBLIC_API_KEY** | Public API key - the prefix (sandbox_, prod_, etc.) determines the environment automatically |
+| **PUBLIC_API_KEY** | Public API key from Yuno |
 | **PRIVATE_SECRET_KEY** | Private secret key (backend only) |
 | **Debug** | Enable debug logs using WooCommerce logger |
 
@@ -143,16 +144,32 @@ PRIVATE_SECRET_KEY=xxx
 
 ---
 
-## 🧪 Environment Detection (Automatic)
+## 🧪 Environment Configuration
 
-The plugin automatically detects the environment based on your Public API Key prefix. No manual configuration needed.
+The plugin uses the **Environment** setting to determine SSL/HTTPS requirements:
 
-| Prefix     | Environment |
-|------------|-------------|
-| `sandbox_` | Sandbox (Testing)     |
-| `staging_` | Staging     |
-| `dev_`     | Development |
-| `prod_`    | Production  |
+| Environment | SSL Required | Best For |
+|-------------|--------------|----------|
+| **Sandbox** | No (allows HTTP) | Local development, testing |
+| **Dev** | No (allows HTTP) | Development servers |
+| **Staging** | Yes (requires HTTPS) | Pre-production testing |
+| **Production** | Yes (requires HTTPS) | Live production sites |
+
+**SSL Behavior:**
+- **Sandbox/Dev:** Gateway works with HTTP - perfect for localhost development
+- **Production/Staging:** Gateway only available on HTTPS sites (except localhost domains)
+- Localhost domains (localhost, .local, .test, 127.0.0.1) are always allowed even in Production mode
+
+### API Endpoint Detection
+
+The plugin detects the Yuno API endpoint from your PUBLIC_API_KEY prefix:
+
+| Key Prefix | API Endpoint |
+|------------|--------------|
+| `sandbox_` | https://api-sandbox.y.uno |
+| `staging_` | https://api-staging.y.uno |
+| `dev_` | https://api-dev.y.uno |
+| `prod_` | https://api.y.uno |
 
 ---
 

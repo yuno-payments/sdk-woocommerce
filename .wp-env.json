@@ -2,7 +2,7 @@
   "core": null,
   "phpVersion": "8.2",
   "plugins": [
-    "./thix-yuno-card"
+    "./yuno-sdk-woocommerce"
   ],
   "config": {
     "WP_DEBUG": true,
@@ -10,6 +10,8 @@
     "WP_DEBUG_DISPLAY": false,
     "SCRIPT_DEBUG": true,
     "WP_MEMORY_LIMIT": "256M",
-    "WP_MAX_MEMORY_LIMIT": "256M"
+    "WP_MAX_MEMORY_LIMIT": "256M",
+    "FORCE_SSL_ADMIN": false,
+    "WP_ENVIRONMENT_TYPE": "local"
   }
 }
