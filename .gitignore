@@ -35,3 +35,8 @@ build/
 # Temporary files
 *.tmp
 *.temp
+
+# Distribution files (client delivery)
+*.pdf
+*.zip
+INSTALACION_Y_USO.md
