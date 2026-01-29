@@ -45,19 +45,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'default'     => 'Yuno Card',
         'desc_tip'    => true,
       ],
-      'environment' => [
-        'title'       => 'Environment',
-        'type'        => 'select',
-        'description' => 'Select the Yuno environment.',
-        'default'     => 'sandbox',
-        'desc_tip'    => true,
-        'options'     => [
-          'sandbox' => 'Sandbox',
-          'prod'    => 'Production',
-          'staging' => 'Staging',
-          'dev'     => 'Dev',
-        ],
-      ],
       'account_code' => [
         'title'       => 'ACCOUNT_CODE',
         'type'        => 'text',
@@ -68,7 +55,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'public_api_key' => [
         'title'       => 'PUBLIC_API_KEY',
         'type'        => 'text',
-        'description' => 'Public API key (used in frontend to initialize the SDK).',
+        'description' => 'Public API key from Yuno. The key prefix (sandbox_, prod_, staging_, dev_) determines the environment automatically.',
         'default'     => '',
         'desc_tip'    => true,
       ],

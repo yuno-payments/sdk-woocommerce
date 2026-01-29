@@ -114,9 +114,8 @@ WooCommerce → Settings → Payments → Card (Yuno)
 |---------|-------------|
 | **Enable** | Enable/disable the payment method |
 | **Checkout Title** | Name displayed to users at checkout |
-| **Environment** | Select Yuno environment (Sandbox, Production, Staging, Dev) |
 | **ACCOUNT_CODE** | Your Yuno account code |
-| **PUBLIC_API_KEY** | Public API key (used in frontend to initialize the SDK) |
+| **PUBLIC_API_KEY** | Public API key - the prefix (sandbox_, prod_, etc.) determines the environment automatically |
 | **PRIVATE_SECRET_KEY** | Private secret key (backend only) |
 | **Debug** | Enable debug logs using WooCommerce logger |
 
@@ -144,13 +143,13 @@ PRIVATE_SECRET_KEY=xxx
 
 ---
 
-## 🧪 Sandbox Mode (Testing)
+## 🧪 Environment Detection (Automatic)
 
-Select the environment in the plugin settings. Yuno also detects the environment based on the Public API Key prefix:
+The plugin automatically detects the environment based on your Public API Key prefix. No manual configuration needed.
 
 | Prefix     | Environment |
 |------------|-------------|
-| `sandbox_` | Sandbox     |
+| `sandbox_` | Sandbox (Testing)     |
 | `staging_` | Staging     |
 | `dev_`     | Development |
 | `prod_`    | Production  |
