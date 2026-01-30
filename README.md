@@ -46,7 +46,7 @@ WordPress REST API (rest-api.php)
 ## 📁 Plugin Structure
 
 ```
-thix-yuno-card/
+yuno-sdk-woocommerce/
 │
 ├── assets/
 │   └── js/
@@ -57,7 +57,7 @@ thix-yuno-card/
 │   ├── class-wc-gateway-thix-yuno-card.php  # WooCommerce Gateway class
 │   └── rest-api.php            # REST endpoints (checkout / payments)
 │
-└── thix-yuno-card.php          # Plugin bootstrap
+└── yuno-sdk-woocommerce.php    # Plugin bootstrap
 ```
 
 ---
@@ -68,7 +68,7 @@ thix-yuno-card/
 
 1. Clone the repository into:
    ```bash
-   wp-content/plugins/thix-yuno-card
+   wp-content/plugins/yuno-sdk-woocommerce
    ```
 
 2. Activate the plugin from WordPress Admin
@@ -114,9 +114,9 @@ WooCommerce → Settings → Payments → Card (Yuno)
 |---------|-------------|
 | **Enable** | Enable/disable the payment method |
 | **Checkout Title** | Name displayed to users at checkout |
-| **Environment** | Select Yuno environment (Sandbox, Production, Staging, Dev) |
-| **ACCOUNT_CODE** | Your Yuno account code |
-| **PUBLIC_API_KEY** | Public API key (used in frontend to initialize the SDK) |
+| **Environment** | Select Yuno environment: Sandbox, Production, Staging, or Dev. Sandbox/Dev allows HTTP for local development. |
+| **ACCOUNT_ID** | Your Yuno account ID |
+| **PUBLIC_API_KEY** | Public API key from Yuno |
 | **PRIVATE_SECRET_KEY** | Private secret key (backend only) |
 | **Debug** | Enable debug logs using WooCommerce logger |
 
@@ -127,7 +127,7 @@ For development or advanced setups, credentials can also be set via:
 **Option A – `wp-config.php`**
 
 ```php
-define('ACCOUNT_CODE', 'your_account_code');
+define('ACCOUNT_ID', 'your_account_id');
 define('PUBLIC_API_KEY', 'sandbox_xxx');
 define('PRIVATE_SECRET_KEY', 'xxx');
 ```
@@ -135,7 +135,7 @@ define('PRIVATE_SECRET_KEY', 'xxx');
 **Option B – Environment variables (Docker / wp-env)**
 
 ```bash
-ACCOUNT_CODE=xxx
+ACCOUNT_ID=xxx
 PUBLIC_API_KEY=sandbox_xxx
 PRIVATE_SECRET_KEY=xxx
 ```
@@ -144,30 +144,51 @@ PRIVATE_SECRET_KEY=xxx
 
 ---
 
-## 🧪 Sandbox Mode (Testing)
+## 🧪 Environment Configuration
 
-Select the environment in the plugin settings. Yuno also detects the environment based on the Public API Key prefix:
+The plugin uses the **Environment** setting to determine SSL/HTTPS requirements:
 
-| Prefix     | Environment |
-|------------|-------------|
-| `sandbox_` | Sandbox     |
-| `staging_` | Staging     |
-| `dev_`     | Development |
-| `prod_`    | Production  |
+| Environment | SSL Required | Best For |
+|-------------|--------------|----------|
+| **Sandbox** | No (allows HTTP) | Local development, testing |
+| **Dev** | No (allows HTTP) | Development servers |
+| **Staging** | Yes (requires HTTPS) | Pre-production testing |
+| **Production** | Yes (requires HTTPS) | Live production sites |
+
+**SSL Behavior:**
+- **Sandbox/Dev:** Gateway works with HTTP - perfect for localhost development
+- **Production/Staging:** Gateway only available on HTTPS sites (except localhost domains)
+- Localhost domains (localhost, .local, .test, 127.0.0.1) are always allowed even in Production mode
+
+### API Endpoint Detection
+
+The plugin detects the Yuno API endpoint from your PUBLIC_API_KEY prefix:
+
+| Key Prefix | API Endpoint |
+|------------|--------------|
+| `sandbox_` | https://api-sandbox.y.uno |
+| `staging_` | https://api-staging.y.uno |
+| `dev_` | https://api-dev.y.uno |
+| `prod_` | https://api.y.uno |
 
 ---
 
-## 🧾 Current Payment Flow (MVP)
+## 🧾 Current Payment Flow (Production-Ready)
 
-1. User enters checkout
-2. Yuno SDK initializes
-3. `checkout_session` is created from the cart
-4. User enters card details
-5. Yuno generates `oneTimeToken`
-6. WordPress creates payment via Yuno API
-7. Yuno processes the payment
+1. User completes WooCommerce checkout → Order created in `pending` status
+2. User redirected to `/order-pay/{ID}/?pay_for_order=true&key=...`
+3. Yuno SDK initializes on order-pay page
+4. `checkout_session` is created from existing WooCommerce order
+5. User enters card details in Yuno SDK modal
+6. Yuno generates `oneTimeToken`
+7. Frontend calls `/thix-yuno/v1/payments` → WordPress creates payment via Yuno API
+8. Yuno processes the payment
+9. Frontend calls `/thix-yuno/v1/confirm` with `payment_id` only
+10. **Backend verifies payment status with Yuno API** (server-side verification)
+11. Order marked as paid/failed based on verified status
+12. User redirected to `/order-received` (thank you page)
 
-> ⚠️ **Note:** Currently the payment is processed before creating the final WooCommerce order (MVP behavior).
+> ✅ **Security:** The `/confirm` endpoint performs server-side verification by querying Yuno's API to verify the payment status. The frontend cannot forge payment confirmations.
 
 ---
 
@@ -178,6 +199,7 @@ Select the environment in the plugin settings. Yuno also detects the environment
 | GET    | `/thix-yuno/v1/public-api-key`    | Returns public key for the SDK     |
 | POST   | `/thix-yuno/v1/checkout-session`  | Creates a checkout session in Yuno |
 | POST   | `/thix-yuno/v1/payments`          | Creates payment using oneTimeToken |
+| POST   | `/thix-yuno/v1/confirm`           | Verifies payment with Yuno API and confirms order |
 
 ---
 

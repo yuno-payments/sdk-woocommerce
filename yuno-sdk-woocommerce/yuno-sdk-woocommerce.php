@@ -1,8 +1,16 @@
 <?php
 /**
- * Plugin Name: 3thix | Yuno Card Gateway (Dev)
- * Description: Development environment for the gateway.
+ * Plugin Name: Yuno SDK for WooCommerce
+ * Description: Accept card payments via Yuno with server-side verification and split marketplace support.
  * Version: 0.1.0
+ * Author: Yuno
+ * Author URI: https://y.uno
+ * Text Domain: yuno-sdk-woocommerce
+ * Domain Path: /languages
+ * Requires at least: 5.0
+ * Requires PHP: 8.0
+ * WC requires at least: 5.0
+ * WC tested up to: 8.0
  */
 
 if (!defined('ABSPATH')) exit;
