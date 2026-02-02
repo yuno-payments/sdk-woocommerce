@@ -58,10 +58,10 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
           'dev'     => 'Dev',
         ],
       ],
-      'account_code' => [
-        'title'       => 'ACCOUNT_CODE',
+      'account_id' => [
+        'title'       => 'ACCOUNT_ID',
         'type'        => 'text',
-        'description' => 'Yuno account code.',
+        'description' => 'Yuno account ID.',
         'default'     => '',
         'desc_tip'    => true,
       ],
@@ -190,13 +190,24 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
   public static function get_setting($key, $default = '') {
     $s = self::get_settings_array();
     if (isset($s[$key]) && $s[$key] !== '') return $s[$key];
+
+    // Backwards compatibility: if requesting account_id, try account_code
+    if ($key === 'account_id' && isset($s['account_code']) && $s['account_code'] !== '') {
+      return $s['account_code'];
+    }
+
     return $default;
   }
 
   public function is_available() {
     if ('yes' !== $this->enabled) return false;
 
-    $account = (string) $this->get_option('account_code', '');
+    // Try new field name first, fallback to old for backwards compatibility
+    $account = (string) $this->get_option('account_id', '');
+    if ($account === '') {
+      $account = (string) $this->get_option('account_code', '');
+    }
+
     $pub     = (string) $this->get_option('public_api_key', '');
     $priv    = (string) $this->get_option('private_secret_key', '');
 
@@ -242,8 +253,8 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
 
     echo '<div class="thix-yuno-receipt">';
     echo '<h3>' . esc_html__('Pay with Yuno', 'thix-yuno') . '</h3>';
-    echo '<p>' . esc_html__('Order', 'thix-yuno') . ' #' . esc_html($order_number) . ' — ' .
-         esc_html__('Total', 'thix-yuno') . ': <strong>' . $total_html . '</strong></p>';
+    echo '<p>' . esc_html__('Order', 'thix-yuno') . ' #<span id="yuno-order-number">' . esc_html($order_number) . '</span> — ' .
+         esc_html__('Total', 'thix-yuno') . ': <strong><span id="yuno-order-total">' . $total_html . '</span></strong></p>';
 
     echo '<div id="loader" style="display:none; margin:12px 0;">' . esc_html__('Loading Yuno…', 'thix-yuno') . '</div>';
     echo '<div id="root"></div>';
@@ -285,7 +296,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'thix-yuno-api',
       plugin_dir_url(__DIR__) . 'assets/js/api.js',
       [],
-      '0.2.2',
+      '0.7.0',
       true
     );
 
@@ -293,7 +304,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'thix-yuno-checkout',
       plugin_dir_url(__DIR__) . 'assets/js/checkout.js',
       ['thix-yuno-api', 'yuno-sdk'],
-      '0.2.2',
+      '1.1.0',
       true
     );
 

@@ -100,16 +100,16 @@ export async function createPayment({ oneTimeToken, checkoutSession, orderId, or
   return res.json();
 }
 
-export async function confirmOrder({ orderId, orderKey, status, paymentId }) {
+export async function confirmOrder({ orderId, orderKey, paymentId }) {
   assertBase();
 
+  // ✅ SECURITY: Only send payment_id, backend verifies status with Yuno API
   const res = await fetch(`${REST_BASE}/confirm`, {
     method: "POST",
     headers: wpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       order_id: orderId,
       order_key: orderKey,
-      status,
       payment_id: paymentId,
     }),
   });
@@ -118,6 +118,48 @@ export async function confirmOrder({ orderId, orderKey, status, paymentId }) {
 
   if (!res.ok) {
     throw new Error(`confirm failed: ${res.status} ${JSON.stringify(json)}`);
+  }
+
+  return json;
+}
+
+export async function checkOrderStatus({ orderId, orderKey }) {
+  assertBase();
+
+  const res = await fetch(`${REST_BASE}/check-order-status`, {
+    method: "POST",
+    headers: wpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      order_id: orderId,
+      order_key: orderKey,
+    }),
+  });
+
+  const json = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(`check-order-status failed: ${res.status} ${JSON.stringify(json)}`);
+  }
+
+  return json;
+}
+
+export async function duplicateOrder({ orderId, orderKey }) {
+  assertBase();
+
+  const res = await fetch(`${REST_BASE}/duplicate-order`, {
+    method: "POST",
+    headers: wpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      order_id: orderId,
+      order_key: orderKey,
+    }),
+  });
+
+  const json = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(`duplicate-order failed: ${res.status} ${JSON.stringify(json)}`);
   }
 
   return json;

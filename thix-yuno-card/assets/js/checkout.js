@@ -1,6 +1,6 @@
 console.log("THIX YUNO checkout.js loaded ✅", window.THIX_YUNO_WC);
 
-import { getCheckoutSession, createPayment, getPublicApiKey, confirmOrder } from "./api.js";
+import { getCheckoutSession, createPayment, getPublicApiKey, confirmOrder, checkOrderStatus, duplicateOrder } from "./api.js";
 
 let yunoInstance = null;
 
@@ -80,21 +80,52 @@ async function waitForYunoSdk(maxMs = 6000) {
 }
 
 /**
- * Fallback redirect:
- * /checkout/order-pay/24/?pay_for_order=true&key=XXX
- * -> /checkout/order-received/24/?key=XXX
+ * Reinitialize checkout with a new order (after failed payment)
+ * Destroys current SDK instance and creates new one with new order
  */
-function fallbackRedirectToOrderReceived() {
-  try {
-    const url = new URL(window.location.href);
+async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal) {
+  console.log("[YUNO] Reinitializing with new order", {
+    oldOrderId: state.orderId,
+    newOrderId,
+  });
 
-    url.pathname = url.pathname.replace(/order-pay\/(\d+)/, "order-received/$1");
-    url.searchParams.delete("pay_for_order");
-    window.location.href = url.toString();
-  } catch (e) {
-    console.warn("[YUNO] fallbackRedirect failed, reloading as last resort", e);
-    window.location.reload();
+  // Destroy current SDK instance
+  if (yunoInstance) {
+    try {
+      yunoInstance.unmountCheckout?.();
+    } catch (e) {
+      console.warn("[YUNO] Error unmounting checkout:", e);
+    }
+    yunoInstance = null;
   }
+
+  // Update state with new order
+  state.orderId = newOrderId;
+  state.orderKey = newOrderKey;
+  state.started = false;
+  state.starting = false;
+  state.paying = false;
+  state.paid = false;
+  state.checkoutSession = null;
+  state.lastPaymentStatus = null;
+  state.lastPaymentId = null;
+
+  // Update visible order information in the UI
+  const orderNumberEl = document.getElementById("yuno-order-number");
+  const orderTotalEl = document.getElementById("yuno-order-total");
+
+  if (orderNumberEl) {
+    orderNumberEl.textContent = newOrderId;
+    console.log("[YUNO] Updated order number in UI:", newOrderId);
+  }
+
+  if (orderTotalEl && formattedTotal) {
+    orderTotalEl.innerHTML = formattedTotal;
+    console.log("[YUNO] Updated order total in UI:", formattedTotal);
+  }
+
+  // Restart checkout flow
+  await startYunoCheckout();
 }
 
 async function startYunoCheckout() {
@@ -108,6 +139,28 @@ async function startYunoCheckout() {
     });
 
     guardContext();
+
+    // ✅ CRITICAL: Check order status first to prevent double payment
+    if (state.payForOrder && state.orderId) {
+      try {
+        const statusRes = await checkOrderStatus({
+          orderId: state.orderId,
+          orderKey: state.orderKey,
+        });
+
+        console.log("[YUNO] check-order-status ✅", statusRes);
+
+        // If order is already paid, redirect immediately
+        if (statusRes.is_paid && statusRes.redirect) {
+          console.log("[YUNO] Order already paid, redirecting...");
+          window.location.href = statusRes.redirect;
+          return;
+        }
+      } catch (e) {
+        console.error("[YUNO] check-order-status failed", e);
+        // Continue anyway (fail-open for better UX)
+      }
+    }
 
     const ok = await waitForYunoSdk();
     if (!ok) {
@@ -229,17 +282,16 @@ async function startYunoCheckout() {
         console.log("[YUNO] yunoPaymentResult ✅", result);
 
         try {
-          const status = state.lastPaymentStatus || "UNKNOWN";
           const paymentId = state.lastPaymentId || null;
 
           console.log("[YUNO] confirm payload", {
             orderId: state.orderId,
             orderKey: state.orderKey,
-            status,
             paymentId,
           });
 
           if (state.payForOrder && state.orderId) {
+            // ✅ SECURITY: Only send payment_id, backend verifies status with Yuno API
             const confirmRes = await confirmOrder({
               // both formats (defensive)
               orderId: state.orderId,
@@ -247,27 +299,71 @@ async function startYunoCheckout() {
               order_id: state.orderId,
               order_key: state.orderKey,
 
-              status,
               paymentId,
               payment_id: paymentId,
             });
 
             console.log("[YUNO] confirmOrder ✅", confirmRes);
 
-            if (confirmRes?.ok && (status === "SUCCEEDED" || status === "VERIFIED")) {
+            // ✅ Backend verifies with Yuno API and updates order status
+            if (confirmRes?.ok) {
               state.paid = true;
               setPayButtonDisabled(true);
 
-              if (confirmRes?.redirect) {
+              // Direct redirect to order-received (no reload to avoid interrupting SDK modal)
+              if (confirmRes.redirect) {
+                console.log("[YUNO] Payment confirmed, redirecting to order-received...");
                 window.location.href = confirmRes.redirect;
                 return;
               }
 
-              fallbackRedirectToOrderReceived();
+              // Fallback: reload if no redirect URL provided
+              console.log("[YUNO] Payment confirmed but no redirect, reloading...");
+              window.location.reload();
               return;
             }
 
-            // rejected/failed => allow retry
+            // Payment failed => create new order and reinitialize
+            if (confirmRes?.failed) {
+              console.log("[YUNO] Payment failed, creating new order...");
+
+              try {
+                const duplicateRes = await duplicateOrder({
+                  orderId: state.orderId,
+                  orderKey: state.orderKey,
+                });
+
+                if (duplicateRes?.ok && duplicateRes?.new_order_id) {
+                  console.log("[YUNO] New order created:", duplicateRes.new_order_id);
+
+                  // Hide SDK loader before reinitializing
+                  setLoaderVisible(false);
+                  yunoInstance.hideLoader();
+
+                  // Reinitialize with new order (Option B: no redirect, same page)
+                  await reinitializeWithNewOrder(
+                    duplicateRes.new_order_id,
+                    duplicateRes.new_order_key,
+                    duplicateRes.formatted_total
+                  );
+
+                  console.log("[YUNO] Checkout reinitialized with new order. User can retry payment.");
+                  return;
+                }
+              } catch (e) {
+                console.error("[YUNO] Failed to create new order", e);
+              }
+
+              // Fallback: if duplication fails, just allow retry on same order
+              console.log("[YUNO] Fallback: allowing retry on same order");
+              state.paying = false;
+              setPayButtonDisabled(false);
+              setLoaderVisible(false);
+              yunoInstance.hideLoader();
+              return;
+            }
+
+            // Other errors => allow retry
             state.paying = false;
             setPayButtonDisabled(false);
           }

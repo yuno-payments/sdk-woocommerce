@@ -35,3 +35,7 @@ build/
 # Temporary files
 *.tmp
 *.temp
+
+# Documentation and distribution files
+INSTALACION_Y_USO.md
+yuno-sdk-woocommerce.zip
