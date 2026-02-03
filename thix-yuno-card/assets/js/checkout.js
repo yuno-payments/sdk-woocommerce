@@ -126,15 +126,15 @@ async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal,
 
   // Update browser URL to match new order (prevents reload issues)
   if (payUrl) {
-    try {
-      window.history.pushState({}, '', payUrl);
-      console.log("[YUNO] Updated browser URL to:", payUrl);
-    } catch (e) {
-      console.warn("[YUNO] Failed to update browser URL:", e);
-    }
+    // TODO: Implement Yuno webhooks for better consistency and eliminate F5 issues
+    // Old approach: window.history.pushState({}, '', payUrl);
+    // New approach: Full redirect to ensure page state is consistent
+    console.log("[YUNO] Redirecting to new order URL:", payUrl);
+    window.location.href = payUrl;
+    return; // Stop execution, page will reload
   }
 
-  // Restart checkout flow
+  // Restart checkout flow (only reached if payUrl is missing)
   await startYunoCheckout();
 }
 
