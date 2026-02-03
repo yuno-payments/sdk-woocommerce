@@ -83,7 +83,7 @@ async function waitForYunoSdk(maxMs = 6000) {
  * Reinitialize checkout with a new order (after failed payment)
  * Destroys current SDK instance and creates new one with new order
  */
-async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal) {
+async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal, payUrl) {
   console.log("[YUNO] Reinitializing with new order", {
     oldOrderId: state.orderId,
     newOrderId,
@@ -122,6 +122,16 @@ async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal)
   if (orderTotalEl && formattedTotal) {
     orderTotalEl.innerHTML = formattedTotal;
     console.log("[YUNO] Updated order total in UI:", formattedTotal);
+  }
+
+  // Update browser URL to match new order (prevents reload issues)
+  if (payUrl) {
+    try {
+      window.history.pushState({}, '', payUrl);
+      console.log("[YUNO] Updated browser URL to:", payUrl);
+    } catch (e) {
+      console.warn("[YUNO] Failed to update browser URL:", e);
+    }
   }
 
   // Restart checkout flow
@@ -344,7 +354,8 @@ async function startYunoCheckout() {
                   await reinitializeWithNewOrder(
                     duplicateRes.new_order_id,
                     duplicateRes.new_order_key,
-                    duplicateRes.formatted_total
+                    duplicateRes.formatted_total,
+                    duplicateRes.pay_url
                   );
 
                   console.log("[YUNO] Checkout reinitialized with new order. User can retry payment.");

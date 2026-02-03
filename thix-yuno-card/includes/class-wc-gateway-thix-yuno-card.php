@@ -296,7 +296,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'thix-yuno-api',
       plugin_dir_url(__DIR__) . 'assets/js/api.js',
       [],
-      '0.7.0',
+      filemtime(plugin_dir_path(__DIR__) . 'assets/js/api.js'),
       true
     );
 
@@ -304,7 +304,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'thix-yuno-checkout',
       plugin_dir_url(__DIR__) . 'assets/js/checkout.js',
       ['thix-yuno-api', 'yuno-sdk'],
-      '1.1.0',
+      filemtime(plugin_dir_path(__DIR__) . 'assets/js/checkout.js'),
       true
     );
 
