@@ -166,6 +166,43 @@ async function startYunoCheckout() {
           window.location.href = statusRes.redirect;
           return;
         }
+
+        // ✅ AUTO-DUPLICATE: If order is failed, automatically create new order
+        // This handles F5 reload on a failed order
+        const failedStatuses = ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'];
+        const hasFailed = statusRes.should_duplicate ||
+                         statusRes.is_failed ||
+                         (statusRes.verified_status && failedStatuses.includes(statusRes.verified_status));
+
+        if (hasFailed) {
+          console.log("[YUNO] Order/payment is failed, auto-duplicating...", {
+            status: statusRes.status,
+            verified_status: statusRes.verified_status,
+          });
+
+          try {
+            const duplicateRes = await duplicateOrder({
+              orderId: state.orderId,
+              orderKey: state.orderKey,
+            });
+
+            if (duplicateRes?.ok && duplicateRes?.new_order_id) {
+              console.log("[YUNO] New order created:", duplicateRes.new_order_id);
+
+              // Redirect to new order (will trigger full page reload)
+              await reinitializeWithNewOrder(
+                duplicateRes.new_order_id,
+                duplicateRes.new_order_key,
+                duplicateRes.formatted_total,
+                duplicateRes.pay_url
+              );
+              return; // Stop execution, reinitialize will redirect
+            }
+          } catch (e) {
+            console.error("[YUNO] Auto-duplicate failed", e);
+            // Continue anyway (fail-open for better UX)
+          }
+        }
       } catch (e) {
         console.error("[YUNO] check-order-status failed", e);
         // Continue anyway (fail-open for better UX)

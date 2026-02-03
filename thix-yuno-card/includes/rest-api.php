@@ -773,7 +773,24 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    // 2. ✅ CRITICAL: Check if payment_id exists (payment was initiated)
+    // 2. ✅ AUTO-DUPLICATE: If order is in failed state, signal frontend to duplicate
+    // This handles the F5 reload case where user refreshes a failed order
+    if ($status === 'failed') {
+        thix_yuno_log('info', 'Check order status: order is failed, should duplicate', [
+            'order_id' => $order_id,
+            'status'   => $status,
+        ]);
+
+        return thix_yuno_json([
+            'is_paid'         => false,
+            'is_failed'       => true,
+            'should_duplicate'=> true,
+            'status'          => $status,
+            'message'         => 'Order failed, needs duplication',
+        ], 200);
+    }
+
+    // 3. ✅ CRITICAL: Check if payment_id exists (payment was initiated)
     // If it exists, verify with Yuno API to prevent double-payment race condition
     $payment_id = $order->get_meta('_thix_yuno_payment_id');
 
@@ -790,7 +807,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    // 3. Payment was initiated, verify with Yuno API
+    // 4. Payment was initiated, verify with Yuno API
     thix_yuno_log('info', 'Check order status: payment_id found, verifying with Yuno', [
         'order_id'   => $order_id,
         'payment_id' => $payment_id,
@@ -868,7 +885,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
         'verified_status' => $verified_status,
     ]);
 
-    // 4. If payment is SUCCEEDED in Yuno, mark order as paid NOW
+    // 5. If payment is SUCCEEDED in Yuno, mark order as paid NOW
     if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
         thix_yuno_log('info', 'Check order status: Payment succeeded in Yuno, marking order as paid', [
             'order_id'   => $order_id,
@@ -893,25 +910,32 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    // 5. If payment is REJECTED/FAILED, allow retry
+    // 6. If payment is REJECTED/FAILED, mark order as failed and signal duplication
     if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
-        thix_yuno_log('warning', 'Check order status: Payment failed in Yuno, allowing retry', [
+        thix_yuno_log('warning', 'Check order status: Payment failed in Yuno, marking as failed', [
             'order_id'   => $order_id,
             'payment_id' => $payment_id,
             'status'     => $verified_status,
         ]);
 
-        // Don't mark as failed here, just allow retry
-        // The confirm endpoint will handle marking as failed
+        // ✅ Sync Yuno status with WooCommerce: mark as failed
+        if ($status !== 'failed') {
+            $order->update_status('failed', 'Yuno payment failed (check-order-status): ' . $verified_status);
+            $order->add_order_note('Yuno payment failed. status=' . $verified_status . ' payment_id=' . $payment_id);
+            $order->save();
+        }
+
         return thix_yuno_json([
-            'is_paid' => false,
-            'status'  => $status,
-            'message' => 'Previous payment failed, you can retry',
+            'is_paid'         => false,
+            'is_failed'       => true,
+            'should_duplicate'=> true,
+            'status'          => 'failed',
+            'message'         => 'Order failed, needs duplication',
             'verified_status' => $verified_status,
         ], 200);
     }
 
-    // 6. Payment is PENDING/PROCESSING/UNKNOWN - safer to block new payment
+    // 7. Payment is PENDING/PROCESSING/UNKNOWN - safer to block new payment
     thix_yuno_log('info', 'Check order status: Payment in intermediate state, allowing retry', [
         'order_id'   => $order_id,
         'payment_id' => $payment_id,
