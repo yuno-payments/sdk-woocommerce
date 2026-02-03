@@ -261,7 +261,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     echo '<div id="form-element"></div>';
     echo '<div id="action-form-element"></div>';
 
-    echo '<button type="button" id="button-pay" style="margin-top:12px; padding:10px 14px;">' .
+    echo '<button type="button" id="button-pay" style="margin-top:12px; padding:10px 14px; display:none;">' .
          esc_html__('Pay Now', 'thix-yuno') .
          '</button>';
 

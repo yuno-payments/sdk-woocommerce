@@ -34,6 +34,12 @@ function setLoaderVisible(visible) {
   loader.style.display = visible ? "block" : "none";
 }
 
+function setPayButtonVisible(visible) {
+  const btn = document.getElementById("button-pay");
+  if (!btn) return;
+  btn.style.display = visible ? "inline-block" : "none";
+}
+
 function setPayButtonDisabled(disabled) {
   const btn = document.getElementById("button-pay");
   if (!btn) return;
@@ -450,7 +456,8 @@ async function startYunoCheckout() {
     yunoInstance.mountCheckout();
     state.started = true;
 
-    // ✅ Button visible but disabled until card fields are valid
+    // ✅ Show button now that SDK is mounted, but keep it disabled until card fields are valid
+    setPayButtonVisible(true);
     setPayButtonDisabled(true);
 
     console.log("[YUNO] mountCheckout ✅ ready");
