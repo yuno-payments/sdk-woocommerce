@@ -268,7 +268,20 @@ async function startYunoCheckout() {
         },
       },
 
-      card: { type: "extends", styles: "" },
+      card: {
+        type: "extends",
+        styles: "",
+        // ✅ CARD VALIDATION: Enable "Pay Now" button only when card fields are valid
+        onChange: ({ error, data }) => {
+          if (error) {
+            console.log("[YUNO] Card validation error:", error);
+            setPayButtonDisabled(true);
+          } else {
+            console.log("[YUNO] Card valid ✅", data);
+            setPayButtonDisabled(false);
+          }
+        }
+      },
 
       /**
        * Called by SDK when it has a oneTimeToken
@@ -436,6 +449,9 @@ async function startYunoCheckout() {
 
     yunoInstance.mountCheckout();
     state.started = true;
+
+    // ✅ Button visible but disabled until card fields are valid
+    setPayButtonDisabled(true);
 
     console.log("[YUNO] mountCheckout ✅ ready");
   } catch (e) {
