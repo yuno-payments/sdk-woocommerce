@@ -315,17 +315,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       true
     );
 
-    static $module_filter_added = false;
-    if (!$module_filter_added) {
-      $module_filter_added = true;
-      add_filter('script_loader_tag', function ($tag, $handle, $src) {
-        if (in_array($handle, ['thix-yuno-api', 'thix-yuno-checkout'], true)) {
-          return '<script type="module" src="' . esc_url($src) . '"></script>';
-        }
-        return $tag;
-      }, 10, 3);
-    }
-
     $country = (string) ($order->get_billing_country() ?: 'CO');
     $email   = (string) ($order->get_billing_email() ?: '');
 

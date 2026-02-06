@@ -1,8 +1,32 @@
-console.log("THIX YUNO checkout.js loaded ", window.THIX_YUNO_WC);
+(function() {
+  'use strict';
 
-import { getCheckoutSession, createPayment, getPublicApiKey, confirmOrder, checkOrderStatus, duplicateOrder } from "./api.js";
+  // Prevent double initialization
+  if (window.THIX_YUNO_CHECKOUT_LOADED) {
+    console.warn("[YUNO] checkout.js already loaded, skipping re-initialization");
+    return;
+  }
+  window.THIX_YUNO_CHECKOUT_LOADED = true;
 
-let yunoInstance = null;
+  console.log("THIX YUNO checkout.js loaded ", window.THIX_YUNO_WC);
+
+  // Guard: Check if API functions are available
+  if (!window.THIX_YUNO_API) {
+    console.error("[YUNO] THIX_YUNO_API not found. api.js not loaded.");
+    return;
+  }
+
+  // Get API functions from global scope (loaded from api.js)
+  const {
+    getCheckoutSession,
+    createPayment,
+    getPublicApiKey,
+    confirmOrder,
+    checkOrderStatus,
+    duplicateOrder,
+  } = window.THIX_YUNO_API;
+
+  let yunoInstance = null;
 
 const ctx = window.THIX_YUNO_WC || {};
 
@@ -274,8 +298,10 @@ async function startYunoCheckout() {
     let isPayingInsideSdk = false;
     setLoaderVisible(true);
 
-    //  Define render mode type - this controls whether SDK opens a modal or renders in-page
-    const RENDER_MODE_TYPE = "modal"; // "modal" or "element"
+    //  SDK requires explicit render mode type
+    // "modal" = opens popup with payment fields
+    // "element" = embeds payment fields directly in page
+    const RENDER_MODE_TYPE = "modal";
 
     await yunoInstance.startCheckout({
       checkoutSession: state.checkoutSession,
@@ -300,7 +326,10 @@ async function startYunoCheckout() {
       card: {
         type: "extends",
         styles: "",
-        hideCardholderName: false,  // Ensure cardholder name field is shown and validated
+        hideCardholderName: false,  // Ensure cardholder name field is shown
+        cardholderName: {
+          required: true  // Enforce cardholder name validation
+        },
         //  CARD VALIDATION: Enable "Pay" button only when card fields are valid
         // Note: In modal mode, this validation is skipped because fields are inside the modal
         onChange: ({ error, data, isDirty }) => {
@@ -316,19 +345,27 @@ async function startYunoCheckout() {
             timestamp: new Date().toISOString()
           });
 
-          // Skip validation if payment is in progress
-          if (state.paying) {
-            console.log("[YUNO]  Payment in progress, skipping validation");
-            return;
-          }
-
-          //  Skip validation in MODAL mode (fields are inside modal, not in page yet)
+          //  In MODAL mode: only re-enable button when fields are valid
+          // Don't disable on validation errors (SDK handles that on submit)
+          // Allow this logic even during payment (state.paying=true) to re-enable after user fixes fields
           if (RENDER_MODE_TYPE === "modal") {
-            console.log("[YUNO]  Modal mode: skipping card validation (fields are inside modal)");
+            console.log("[YUNO]  Modal mode: checking if should re-enable button");
+            // Only re-enable when fields are valid (for retry after error)
+            if (!error && (!state.selectedPaymentMethod || state.selectedPaymentMethod === 'CARD')) {
+              console.log("[YUNO]  Card fields valid in modal, re-enabling button and resetting state");
+              state.paying = false; // Reset paying state so user can click Pay again
+              setPayButtonDisabled(false);
+            }
             return;
           }
 
-          //  Apply validation for ELEMENT mode with CARD method
+          // Skip validation in ELEMENT mode if payment is in progress
+          if (state.paying) {
+            console.log("[YUNO]  Payment in progress, skipping element mode validation");
+            return;
+          }
+
+          //  Apply full validation for ELEMENT mode with CARD method
           if (!state.selectedPaymentMethod || state.selectedPaymentMethod === 'CARD') {
             //  Simplified validation: Trust Yuno SDK primarily
 
@@ -667,3 +704,5 @@ if (!window.__THIX_YUNO_BINDINGS__) {
 // Prefer event, keep fallback
 window.addEventListener("yuno-sdk-ready", () => startYunoCheckout());
 setTimeout(() => startYunoCheckout(), 400);
+
+})();
