@@ -109,6 +109,35 @@ function thix_yuno_get_wc_price_decimals() {
 }
 
 /**
+ * Extract payment status from Yuno API response.
+ * Yuno may use different field names and nesting structures across different endpoints.
+ * This function tries multiple possible locations for the status field.
+ *
+ * @param array $raw The raw Yuno API response
+ * @return string The extracted status in uppercase, or 'UNKNOWN' if not found
+ */
+function thix_yuno_extract_payment_status($raw) {
+    $status_candidates = [
+        $raw['status'] ?? null,
+        $raw['state'] ?? null,
+        $raw['payment_status'] ?? null,
+        $raw['payment']['status'] ?? null,
+        $raw['payment']['state'] ?? null,
+        $raw['payment']['payment_status'] ?? null,
+        $raw['transaction_status'] ?? null,
+        $raw['transaction']['status'] ?? null,
+    ];
+
+    foreach ($status_candidates as $candidate) {
+        if ($candidate !== null && $candidate !== '') {
+            return strtoupper(trim($candidate));
+        }
+    }
+
+    return 'UNKNOWN';
+}
+
+/**
  * Legacy helper to convert to minor units (no longer used for amount.value sent to Yuno).
  * Kept in case you want to use it in logs or internal calculations.
  */
@@ -628,28 +657,8 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
         'full_response' => $res['raw'],
     ]);
 
-    // Yuno may use different field names and nesting structures
-    // Try multiple possible locations for the status field
-    $raw = $res['raw'];
-    $status_candidates = [
-        $raw['status'] ?? null,
-        $raw['state'] ?? null,
-        $raw['payment_status'] ?? null,
-        $raw['payment']['status'] ?? null,
-        $raw['payment']['state'] ?? null,
-        $raw['payment']['payment_status'] ?? null,
-        $raw['transaction_status'] ?? null,
-        $raw['transaction']['status'] ?? null,
-    ];
-
-    // Find first non-null status
-    $verified_status = 'UNKNOWN';
-    foreach ($status_candidates as $candidate) {
-        if ($candidate !== null && $candidate !== '') {
-            $verified_status = strtoupper(trim($candidate));
-            break;
-        }
-    }
+    // Extract status from Yuno response
+    $verified_status = thix_yuno_extract_payment_status($res['raw']);
 
     thix_yuno_log('info', 'Confirm: payment status verified', [
         'order_id'           => $order->get_id(),
@@ -864,26 +873,8 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    // Parse status from Yuno response (same logic as confirm endpoint)
-    $raw = $res['raw'];
-    $status_candidates = [
-        $raw['status'] ?? null,
-        $raw['state'] ?? null,
-        $raw['payment_status'] ?? null,
-        $raw['payment']['status'] ?? null,
-        $raw['payment']['state'] ?? null,
-        $raw['payment']['payment_status'] ?? null,
-        $raw['transaction_status'] ?? null,
-        $raw['transaction']['status'] ?? null,
-    ];
-
-    $verified_status = 'UNKNOWN';
-    foreach ($status_candidates as $candidate) {
-        if ($candidate !== null && $candidate !== '') {
-            $verified_status = strtoupper(trim($candidate));
-            break;
-        }
-    }
+    // Extract status from Yuno response
+    $verified_status = thix_yuno_extract_payment_status($res['raw']);
 
     thix_yuno_log('info', 'Check order status: Yuno verification result', [
         'order_id'        => $order_id,
@@ -986,14 +977,25 @@ function thix_yuno_duplicate_order(WP_REST_Request $request) {
             }
         }
 
-        // Copy shipping items
+        // Copy shipping items (clone to avoid mutating original order items)
         foreach ($order->get_items('shipping') as $item_id => $item) {
-            $new_order->add_item($item);
+            $cloned_item = clone $item;
+            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+            $new_order->add_item($cloned_item);
         }
 
-        // Copy fees
+        // Copy fees (clone to avoid mutating original order items)
         foreach ($order->get_items('fee') as $item_id => $item) {
-            $new_order->add_item($item);
+            $cloned_item = clone $item;
+            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+            $new_order->add_item($cloned_item);
+        }
+
+        // Copy coupons (CRITICAL: preserve discounts from original order)
+        foreach ($order->get_items('coupon') as $item_id => $item) {
+            $cloned_item = clone $item;
+            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+            $new_order->add_item($cloned_item);
         }
 
         // Copy customer data

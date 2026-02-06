@@ -27,7 +27,6 @@ const state = {
   selectedPaymentMethod: null,
 
   // Filled after /payments
-  lastPaymentStatus: null,
   lastPaymentId: null,
 };
 
@@ -138,7 +137,6 @@ async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal,
   state.paying = false;
   state.paid = false;
   state.checkoutSession = null;
-  state.lastPaymentStatus = null;
   state.lastPaymentId = null;
 
   // Update visible order information in the UI
@@ -417,7 +415,6 @@ async function startYunoCheckout() {
           }
 
           //  Source of truth (more reliable than yunoPaymentResult payload)
-          state.lastPaymentStatus = paymentRes?.response?.status || "UNKNOWN";
           state.lastPaymentId = paymentRes?.payment_id || paymentRes?.response?.id || null;
 
           console.log("[YUNO] createPayment ", paymentRes);
