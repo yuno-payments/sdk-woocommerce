@@ -279,6 +279,9 @@ async function startYunoCheckout() {
     let isPayingInsideSdk = false;
     setLoaderVisible(true);
 
+    // ✅ Define render mode type - this controls whether SDK opens a modal or renders in-page
+    const RENDER_MODE_TYPE = "modal"; // "modal" or "element"
+
     await yunoInstance.startCheckout({
       checkoutSession: state.checkoutSession,
       elementSelector: "#root",
@@ -292,7 +295,7 @@ async function startYunoCheckout() {
       },
 
       renderMode: {
-        type: "modal",
+        type: RENDER_MODE_TYPE,
         elementSelector: {
           apmForm: "#form-element",
           actionForm: "#action-form-element",
@@ -303,7 +306,8 @@ async function startYunoCheckout() {
         type: "extends",
         styles: "",
         hideCardholderName: false,  // Ensure cardholder name field is shown and validated
-        // ✅ CARD VALIDATION: Enable "Pay Now" button only when card fields are valid
+        // ✅ CARD VALIDATION: Enable "Pay" button only when card fields are valid
+        // Note: In modal mode, this validation is skipped because fields are inside the modal
         onChange: ({ error, data, isDirty }) => {
           console.log("[YUNO] 🔍 Card onChange event - DETAILED:", {
             hasError: !!error,
@@ -313,6 +317,7 @@ async function startYunoCheckout() {
             isDirty,
             selectedMethod: state.selectedPaymentMethod,
             isPaying: state.paying,
+            renderMode: RENDER_MODE_TYPE,
             timestamp: new Date().toISOString()
           });
 
@@ -322,7 +327,13 @@ async function startYunoCheckout() {
             return;
           }
 
-          // Apply validation for CARD method or if no method selected yet (default to CARD)
+          // ✅ Skip validation in MODAL mode (fields are inside modal, not in page yet)
+          if (RENDER_MODE_TYPE === "modal") {
+            console.log("[YUNO] 🎭 Modal mode: skipping card validation (fields are inside modal)");
+            return;
+          }
+
+          // ✅ Apply validation for ELEMENT mode with CARD method
           if (!state.selectedPaymentMethod || state.selectedPaymentMethod === 'CARD') {
             // ✅ Simplified validation: Trust Yuno SDK primarily
 
@@ -346,12 +357,13 @@ async function startYunoCheckout() {
 
       /**
        * Called when user selects a payment method
-       * Allows us to handle APMs differently from cards
+       * Handles different logic for modal vs element mode
        */
       yunoPaymentMethodSelected: (data) => {
         console.log("[YUNO] 💳 Payment method selected:", {
           type: data?.type,
           name: data?.name,
+          renderMode: RENDER_MODE_TYPE,
           timestamp: new Date().toISOString()
         });
 
@@ -364,9 +376,17 @@ async function startYunoCheckout() {
           console.log("[YUNO] ✅ APM selected, enabling button (no validation needed)");
           setPayButtonDisabled(false);
         } else if (data?.type === 'CARD') {
-          console.log("[YUNO] 🔍 Card selected, button will be enabled when fields are valid");
-          // Button stays disabled, will be enabled by card.onChange when valid
-          setPayButtonDisabled(true);
+          if (RENDER_MODE_TYPE === "modal") {
+            // ✅ MODAL mode: Enable button immediately
+            // Fields will be inside the modal (opened after clicking Pay button)
+            console.log("[YUNO] 🎭 Card selected (modal mode), enabling button to open modal");
+            setPayButtonDisabled(false);
+          } else {
+            // ✅ ELEMENT mode: Disable button until fields are valid
+            // Button will be enabled by card.onChange when valid
+            console.log("[YUNO] 📄 Card selected (element mode), button will be enabled when fields are valid");
+            setPayButtonDisabled(true);
+          }
         }
       },
 
