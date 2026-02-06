@@ -52,6 +52,9 @@ const state = {
 
   // Filled after /payments
   lastPaymentId: null,
+
+  // Render mode: "modal" or "element"
+  renderMode: "modal",
 };
 
 function setLoaderVisible(visible) {
@@ -61,13 +64,13 @@ function setLoaderVisible(visible) {
 }
 
 function setPayButtonVisible(visible) {
-  const btn = document.getElementById("button-pay");
+  const btn = document.getElementById("thix-yuno-button-pay");
   if (!btn) return;
   btn.style.display = visible ? "block" : "none";  // block for full width
 }
 
 function setPayButtonDisabled(disabled) {
-  const btn = document.getElementById("button-pay");
+  const btn = document.getElementById("thix-yuno-button-pay");
   if (!btn) return;
   btn.disabled = !!disabled;
   btn.style.opacity = disabled ? "0.5" : "1";
@@ -77,7 +80,7 @@ function setPayButtonDisabled(disabled) {
 
 // Add hover effects to Pay button
 function initPayButtonHoverEffects() {
-  const btn = document.getElementById("button-pay");
+  const btn = document.getElementById("thix-yuno-button-pay");
   if (!btn) return;
 
   btn.addEventListener("mouseenter", () => {
@@ -100,7 +103,7 @@ function resolvePayButtonTarget(e) {
   const t = e.target;
 
   // Your custom button (order-pay receipt)
-  const custom = t.closest?.("#button-pay");
+  const custom = t.closest?.("#thix-yuno-button-pay");
   if (custom) return custom;
 
   // Woo "Pay for order" button (varies by template)
@@ -302,10 +305,11 @@ async function startYunoCheckout() {
     // "modal" = opens popup with payment fields
     // "element" = embeds payment fields directly in page
     const RENDER_MODE_TYPE = "modal";
+    state.renderMode = RENDER_MODE_TYPE; // Store in state for access elsewhere
 
     await yunoInstance.startCheckout({
       checkoutSession: state.checkoutSession,
-      elementSelector: "#root",
+      elementSelector: "#thix-yuno-root",
       countryCode: state.countryCode,
       language: "es",
       showLoading: true,
@@ -318,8 +322,8 @@ async function startYunoCheckout() {
       renderMode: {
         type: RENDER_MODE_TYPE,
         elementSelector: {
-          apmForm: "#form-element",
-          actionForm: "#action-form-element",
+          apmForm: "#thix-yuno-apm-form",
+          actionForm: "#thix-yuno-action-form",
         },
       },
 
@@ -662,10 +666,20 @@ async function handlePayClick(e) {
     return;
   }
 
-  // Set paying state BEFORE startPayment to prevent double-click race condition
-  // If validation fails, yunoError callback will reset this to false
-  state.paying = true;
-  setPayButtonDisabled(true);
+  //  MODAL MODE: Don't disable button on click
+  // The SDK will handle validation inside the modal
+  // Button will be disabled in yunoCreatePayment when payment actually starts
+  // This prevents blocking the user if SDK shows validation error without calling yunoCreatePayment
+  if (state.renderMode === "modal") {
+    console.log("[YUNO]  Modal mode: button stays enabled, SDK will validate inside modal");
+    // Don't set state.paying or disable button here
+  } else {
+    //  ELEMENT MODE: Disable button immediately
+    // Fields are on the page, so validation is already done
+    console.log("[YUNO]  Element mode: disabling button to prevent double-click");
+    state.paying = true;
+    setPayButtonDisabled(true);
+  }
 
   console.log("[YUNO] Starting payment");
   yunoInstance.startPayment();
@@ -676,7 +690,7 @@ function handleKeyPress(e) {
   if (e.key === "Enter" || e.keyCode === 13) {
     console.log("[YUNO]  Enter key pressed, checking if should allow...");
 
-    const btn = document.getElementById("button-pay");
+    const btn = document.getElementById("thix-yuno-button-pay");
 
     // Only allow Enter if button is enabled
     if (!btn || btn.disabled || state.paying) {

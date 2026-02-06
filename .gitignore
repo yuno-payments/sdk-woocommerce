@@ -43,3 +43,6 @@ yuno-sdk-woocommerce.zip
 
 # QA distribution folder
 share-to-qa/
+
+# Local testing builds
+testlocal-host.zip

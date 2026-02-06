@@ -255,11 +255,11 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
          esc_html__('Total', 'thix-yuno') . ': <strong><span id="yuno-order-total">' . $total_html . '</span></strong></p>';
 
     echo '<div id="loader" style="display:none; margin:12px 0;">' . esc_html__('Loading Yuno…', 'thix-yuno') . '</div>';
-    echo '<div id="root"></div>';
-    echo '<div id="form-element"></div>';
-    echo '<div id="action-form-element"></div>';
+    echo '<div id="thix-yuno-root"></div>';
+    echo '<div id="thix-yuno-apm-form"></div>';
+    echo '<div id="thix-yuno-action-form"></div>';
 
-    echo '<button type="button" id="button-pay" style="
+    echo '<button type="button" id="thix-yuno-button-pay" style="
          display:none;
          width:100%;
          margin-top:16px;
