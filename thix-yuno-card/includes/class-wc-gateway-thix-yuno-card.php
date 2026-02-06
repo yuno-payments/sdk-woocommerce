@@ -261,13 +261,22 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     echo '<div id="form-element"></div>';
     echo '<div id="action-form-element"></div>';
 
-    echo '<button type="button" id="button-pay" style="margin-top:12px; padding:10px 14px; display:none;">' .
-         esc_html__('Pay Now', 'thix-yuno') .
+    echo '<button type="button" id="button-pay" style="
+         display:none;
+         width:100%;
+         margin-top:16px;
+         padding:14px 20px;
+         background-color:#000000;
+         color:#ffffff;
+         border:none;
+         border-radius:8px;
+         font-size:16px;
+         font-weight:600;
+         cursor:pointer;
+         transition:background-color 0.2s ease, opacity 0.2s ease;
+      ">' .
+         esc_html__('Pay', 'thix-yuno') .
          '</button>';
-
-    echo '<p style="margin-top:10px; opacity:.7;">' .
-         esc_html__('Do not close this page until the payment finishes.', 'thix-yuno') .
-         '</p>';
 
     echo '</div>';
   }
