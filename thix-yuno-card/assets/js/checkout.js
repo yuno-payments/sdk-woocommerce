@@ -355,6 +355,10 @@ async function startYunoCheckout() {
           timestamp: new Date().toISOString()
         });
 
+        // Reset payment state when user changes payment method
+        // This allows switching between payment methods without getting stuck
+        state.paying = false;
+
         // Store selected method
         state.selectedPaymentMethod = data?.type;
 
@@ -423,14 +427,11 @@ async function startYunoCheckout() {
           state.paying = false;
           setLoaderVisible(false);
 
-          // Re-enable button based on payment method
-          if (state.selectedPaymentMethod && state.selectedPaymentMethod !== 'CARD') {
-            console.log("[YUNO]  APM payment error, re-enabling button");
-            setPayButtonDisabled(false);
-          } else {
-            console.log("[YUNO]  Card payment error, onChange will manage button state");
-            // For cards, let onChange validation decide if button should be enabled
-          }
+          // Re-enable button to allow retry (for both APM and CARD)
+          // If card fields are invalid, SDK will show validation errors on next click
+          // If card fields are valid, user can retry immediately without modifying fields
+          console.log("[YUNO]  Payment error, re-enabling button for retry");
+          setPayButtonDisabled(false);
 
           throw e;
         } finally {
@@ -553,17 +554,11 @@ async function startYunoCheckout() {
         setLoaderVisible(false);
         yunoInstance.hideLoader();
 
-        // Re-enable button based on payment method
-        // For APMs, always re-enable after error
-        // For CARD, let onChange validation decide
-        if (state.selectedPaymentMethod && state.selectedPaymentMethod !== 'CARD') {
-          console.log("[YUNO]  APM error, re-enabling button for retry");
-          setPayButtonDisabled(false);
-        } else {
-          console.log("[YUNO]  Card error, button state will be managed by onChange validation");
-          // Don't force enable - let card.onChange handle it based on current field state
-          // This prevents enabling button with invalid fields after error
-        }
+        // Re-enable button to allow retry (for both APM and CARD)
+        // If card fields are invalid, SDK will show validation errors on next click
+        // If card fields are valid, user can retry immediately without modifying fields
+        console.log("[YUNO]  Payment error, re-enabling button for retry");
+        setPayButtonDisabled(false);
       },
     });
 
@@ -630,7 +625,11 @@ async function handlePayClick(e) {
     return;
   }
 
-  //  DON'T set state.paying here - let Yuno validate first
+  // Set paying state BEFORE startPayment to prevent double-click race condition
+  // If validation fails, yunoError callback will reset this to false
+  state.paying = true;
+  setPayButtonDisabled(true);
+
   console.log("[YUNO] Starting payment");
   yunoInstance.startPayment();
 }

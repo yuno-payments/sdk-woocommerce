@@ -660,14 +660,37 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     // Extract status from Yuno response
     $verified_status = thix_yuno_extract_payment_status($res['raw']);
 
+    // ✅ SECURITY: Validate payment_id belongs to this order
+    // Prevent payment reuse attack where attacker uses a legitimate payment_id
+    // from one order to mark a different order as paid
+    $stored_payment_id = $order->get_meta('_thix_yuno_payment_id');
+
+    if ($stored_payment_id && $stored_payment_id !== $payment_id) {
+        thix_yuno_log('error', 'Confirm: payment_id mismatch - possible payment reuse attack', [
+            'order_id'           => $order->get_id(),
+            'received_payment_id'=> $payment_id,
+            'stored_payment_id'  => $stored_payment_id,
+            'verified_status'    => $verified_status,
+        ]);
+
+        $order->add_order_note('SECURITY: Payment verification failed - payment_id mismatch. Expected: ' . $stored_payment_id . ', Got: ' . $payment_id);
+        $order->save();
+
+        return thix_yuno_json([
+            'error'   => 'Payment does not belong to this order',
+            'order_id'=> $order->get_id(),
+        ], 403);
+    }
+
     thix_yuno_log('info', 'Confirm: payment status verified', [
         'order_id'           => $order->get_id(),
         'payment_id'         => $payment_id,
         'verified_status'    => $verified_status,
-        'raw_status'         => $raw['status'] ?? null,
-        'raw_state'          => $raw['state'] ?? null,
-        'raw_payment_status' => $raw['payment_status'] ?? null,
-        'nested_payment'     => isset($raw['payment']) ? 'yes' : 'no',
+        'stored_payment_id'  => $stored_payment_id,
+        'raw_status'         => $res['raw']['status'] ?? null,
+        'raw_state'          => $res['raw']['state'] ?? null,
+        'raw_payment_status' => $res['raw']['payment_status'] ?? null,
+        'nested_payment'     => isset($res['raw']['payment']) ? 'yes' : 'no',
     ]);
 
     // Handle verified status
@@ -966,15 +989,26 @@ function thix_yuno_duplicate_order(WP_REST_Request $request) {
         // Create new order
         $new_order = wc_create_order();
 
-        // Copy all items from original order
-        foreach ($order->get_items() as $item_id => $item) {
-            $product_id = $item->get_product_id();
-            $quantity   = $item->get_quantity();
-            $product    = $item->get_product();
+        // Check if order creation failed (wc_create_order can return WP_Error)
+        if (is_wp_error($new_order)) {
+            thix_yuno_log('error', 'Duplicate order: wc_create_order failed', [
+                'original_order_id' => $order->get_id(),
+                'error_code'        => $new_order->get_error_code(),
+                'error_message'     => $new_order->get_error_message(),
+            ]);
 
-            if ($product) {
-                $new_order->add_product($product, $quantity);
-            }
+            return thix_yuno_json([
+                'error'   => 'Failed to create new order',
+                'message' => $new_order->get_error_message(),
+            ], 500);
+        }
+
+        // Copy all line items from original order (clone to preserve original prices)
+        // Using add_product() would use current prices, not original order prices
+        foreach ($order->get_items() as $item_id => $item) {
+            $cloned_item = clone $item;
+            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+            $new_order->add_item($cloned_item);
         }
 
         // Copy shipping items (clone to avoid mutating original order items)
