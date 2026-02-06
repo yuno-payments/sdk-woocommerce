@@ -303,11 +303,10 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
         return thix_yuno_json(['error' => 'Yuno response missing checkout_session/id', 'response' => $res['raw']], 400);
     }
 
-    // ✅ LOG: Ver qué métodos de pago retorna Yuno
     thix_yuno_log('info', 'Yuno checkout session response', [
         'order_id'         => $order->get_id(),
         'checkout_session' => $checkoutSession,
-        'full_response'    => $res['raw'], // Puede contener payment_methods disponibles
+        'full_response'    => $res['raw'], // May contain available payment_methods
     ]);
 
     $order->update_meta_data('_thix_yuno_checkout_session', $checkoutSession);

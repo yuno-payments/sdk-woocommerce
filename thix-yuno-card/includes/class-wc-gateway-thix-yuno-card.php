@@ -80,7 +80,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'desc_tip'    => true,
       ],
 
-      // ✅ Split (MVP)
       'split_enabled' => [
         'title'       => 'Split Payments',
         'type'        => 'checkbox',
@@ -96,7 +95,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'desc_tip'    => true,
       ],
 
-      // ✅ New recommended: commission %
       'split_commission_percent' => [
         'title'       => 'Commission % (Platform)',
         'type'        => 'text',

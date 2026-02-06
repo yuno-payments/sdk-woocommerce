@@ -1,4 +1,4 @@
-console.log("THIX YUNO checkout.js loaded ", window.THIX_YUNO_WC);
+console.log("THIX YUNO checkout.js loaded ✅", window.THIX_YUNO_WC);
 
 import { getCheckoutSession, createPayment, getPublicApiKey, confirmOrder, checkOrderStatus, duplicateOrder } from "./api.js";
 
@@ -171,14 +171,14 @@ async function startYunoCheckout() {
   state.starting = true;
 
   try {
-    console.log("[YUNO] startYunoCheckout ", {
+    console.log("[YUNO] startYunoCheckout ✅", {
       payForOrder: state.payForOrder,
       orderId: state.orderId,
     });
 
     guardContext();
 
-    //  CRITICAL: Check order status first to prevent double payment
+    // ✅ CRITICAL: Check order status first to prevent double payment
     if (state.payForOrder && state.orderId) {
       try {
         const statusRes = await checkOrderStatus({
@@ -186,7 +186,7 @@ async function startYunoCheckout() {
           orderKey: state.orderKey,
         });
 
-        console.log("[YUNO] check-order-status ", statusRes);
+        console.log("[YUNO] check-order-status ✅", statusRes);
 
         // If order is already paid, redirect immediately
         if (statusRes.is_paid && statusRes.redirect) {
@@ -195,7 +195,7 @@ async function startYunoCheckout() {
           return;
         }
 
-        //  AUTO-DUPLICATE: If order is failed, automatically create new order
+        // ✅ AUTO-DUPLICATE: If order is failed, automatically create new order
         // This handles F5 reload on a failed order
         const failedStatuses = ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'];
         const hasFailed = statusRes.should_duplicate ||
@@ -266,7 +266,7 @@ async function startYunoCheckout() {
     // 2) Public API key
     const publicApiKey = await getPublicApiKey();
     if (!publicApiKey) {
-      console.error(" publicApiKey empty. Check /public-api-key");
+      console.error("❌ publicApiKey empty. Check /public-api-key");
       return;
     }
 
@@ -276,7 +276,7 @@ async function startYunoCheckout() {
     let isPayingInsideSdk = false;
     setLoaderVisible(true);
 
-    //  Define render mode type - this controls whether SDK opens a modal or renders in-page
+    // ✅ Define render mode type - this controls whether SDK opens a modal or renders in-page
     const RENDER_MODE_TYPE = "modal"; // "modal" or "element"
 
     await yunoInstance.startCheckout({
@@ -303,10 +303,10 @@ async function startYunoCheckout() {
         type: "extends",
         styles: "",
         hideCardholderName: false,  // Ensure cardholder name field is shown and validated
-        //  CARD VALIDATION: Enable "Pay" button only when card fields are valid
+        // ✅ CARD VALIDATION: Enable "Pay" button only when card fields are valid
         // Note: In modal mode, this validation is skipped because fields are inside the modal
         onChange: ({ error, data, isDirty }) => {
-          console.log("[YUNO]  Card onChange event - DETAILED:", {
+          console.log("[YUNO] 🔍 Card onChange event - DETAILED:", {
             hasError: !!error,
             errorValue: error,
             dataKeys: data ? Object.keys(data) : [],
@@ -320,19 +320,19 @@ async function startYunoCheckout() {
 
           // Skip validation if payment is in progress
           if (state.paying) {
-            console.log("[YUNO]  Payment in progress, skipping validation");
+            console.log("[YUNO] ⏸️ Payment in progress, skipping validation");
             return;
           }
 
-          //  Skip validation in MODAL mode (fields are inside modal, not in page yet)
+          // ✅ Skip validation in MODAL mode (fields are inside modal, not in page yet)
           if (RENDER_MODE_TYPE === "modal") {
-            console.log("[YUNO]  Modal mode: skipping card validation (fields are inside modal)");
+            console.log("[YUNO] 🎭 Modal mode: skipping card validation (fields are inside modal)");
             return;
           }
 
-          //  Apply validation for ELEMENT mode with CARD method
+          // ✅ Apply validation for ELEMENT mode with CARD method
           if (!state.selectedPaymentMethod || state.selectedPaymentMethod === 'CARD') {
-            //  Simplified validation: Trust Yuno SDK primarily
+            // ✅ Simplified validation: Trust Yuno SDK primarily
 
             if (error) {
               console.log("[YUNO] Card validation error");
@@ -350,7 +350,7 @@ async function startYunoCheckout() {
        * Handles different logic for modal vs element mode
        */
       yunoPaymentMethodSelected: (data) => {
-        console.log("[YUNO]  Payment method selected:", {
+        console.log("[YUNO] 💳 Payment method selected:", {
           type: data?.type,
           name: data?.name,
           renderMode: RENDER_MODE_TYPE,
@@ -363,18 +363,18 @@ async function startYunoCheckout() {
         // If APM (not CARD), enable button immediately
         // APMs don't have field validation like cards
         if (data?.type && data.type !== 'CARD') {
-          console.log("[YUNO]  APM selected, enabling button (no validation needed)");
+          console.log("[YUNO] ✅ APM selected, enabling button (no validation needed)");
           setPayButtonDisabled(false);
         } else if (data?.type === 'CARD') {
           if (RENDER_MODE_TYPE === "modal") {
-            //  MODAL mode: Enable button immediately
+            // ✅ MODAL mode: Enable button immediately
             // Fields will be inside the modal (opened after clicking Pay button)
-            console.log("[YUNO]  Card selected (modal mode), enabling button to open modal");
+            console.log("[YUNO] 🎭 Card selected (modal mode), enabling button to open modal");
             setPayButtonDisabled(false);
           } else {
-            //  ELEMENT mode: Disable button until fields are valid
+            // ✅ ELEMENT mode: Disable button until fields are valid
             // Button will be enabled by card.onChange when valid
-            console.log("[YUNO]  Card selected (element mode), button will be enabled when fields are valid");
+            console.log("[YUNO] 📄 Card selected (element mode), button will be enabled when fields are valid");
             setPayButtonDisabled(true);
           }
         }
@@ -416,22 +416,22 @@ async function startYunoCheckout() {
             return;
           }
 
-          //  Source of truth (more reliable than yunoPaymentResult payload)
+          // ✅ Source of truth (more reliable than yunoPaymentResult payload)
           state.lastPaymentStatus = paymentRes?.response?.status || "UNKNOWN";
           state.lastPaymentId = paymentRes?.payment_id || paymentRes?.response?.id || null;
 
-          console.log("[YUNO] createPayment ", paymentRes);
+          console.log("[YUNO] createPayment ✅", paymentRes);
         } catch (e) {
-          console.error("[YUNO]  createPayment failed", e);
+          console.error("[YUNO] 💥 createPayment failed", e);
           state.paying = false;
           setLoaderVisible(false);
 
           // Re-enable button based on payment method
           if (state.selectedPaymentMethod && state.selectedPaymentMethod !== 'CARD') {
-            console.log("[YUNO]  APM payment error, re-enabling button");
+            console.log("[YUNO] 🔄 APM payment error, re-enabling button");
             setPayButtonDisabled(false);
           } else {
-            console.log("[YUNO]  Card payment error, onChange will manage button state");
+            console.log("[YUNO] 🔄 Card payment error, onChange will manage button state");
             // For cards, let onChange validation decide if button should be enabled
           }
 
@@ -446,7 +446,7 @@ async function startYunoCheckout() {
        * We confirm the Woo order based on what our backend returned from /payments
        */
       yunoPaymentResult: async (result) => {
-        console.log("[YUNO] yunoPaymentResult ", result);
+        console.log("[YUNO] yunoPaymentResult ✅", result);
 
         try {
           const paymentId = state.lastPaymentId || null;
@@ -458,7 +458,7 @@ async function startYunoCheckout() {
           });
 
           if (state.payForOrder && state.orderId) {
-            //  SECURITY: Only send payment_id, backend verifies status with Yuno API
+            // ✅ SECURITY: Only send payment_id, backend verifies status with Yuno API
             const confirmRes = await confirmOrder({
               // both formats (defensive)
               orderId: state.orderId,
@@ -470,9 +470,9 @@ async function startYunoCheckout() {
               payment_id: paymentId,
             });
 
-            console.log("[YUNO] confirmOrder ", confirmRes);
+            console.log("[YUNO] confirmOrder ✅", confirmRes);
 
-            //  Backend verifies with Yuno API and updates order status
+            // ✅ Backend verifies with Yuno API and updates order status
             if (confirmRes?.ok) {
               state.paid = true;
               setPayButtonDisabled(true);
@@ -546,7 +546,7 @@ async function startYunoCheckout() {
       },
 
       yunoError: (error) => {
-        console.error("[YUNO]  yunoError", {
+        console.error("[YUNO] 💥 yunoError", {
           error,
           selectedMethod: state.selectedPaymentMethod,
           timestamp: new Date().toISOString()
@@ -560,10 +560,10 @@ async function startYunoCheckout() {
         // For APMs, always re-enable after error
         // For CARD, let onChange validation decide
         if (state.selectedPaymentMethod && state.selectedPaymentMethod !== 'CARD') {
-          console.log("[YUNO]  APM error, re-enabling button for retry");
+          console.log("[YUNO] 🔄 APM error, re-enabling button for retry");
           setPayButtonDisabled(false);
         } else {
-          console.log("[YUNO]  Card error, button state will be managed by onChange validation");
+          console.log("[YUNO] 🔄 Card error, button state will be managed by onChange validation");
           // Don't force enable - let card.onChange handle it based on current field state
           // This prevents enabling button with invalid fields after error
         }
@@ -573,7 +573,7 @@ async function startYunoCheckout() {
     yunoInstance.mountCheckout();
     state.started = true;
 
-    //  Show button now that SDK is mounted, but keep it disabled until card fields are valid
+    // ✅ Show button now that SDK is mounted, but keep it disabled until card fields are valid
     setPayButtonVisible(true);
     setPayButtonDisabled(true);
 
@@ -591,7 +591,7 @@ async function handlePayClick(e) {
   const btn = resolvePayButtonTarget(e);
   if (!btn) return;
 
-  console.log("[YUNO]  Pay button clicked", {
+  console.log("[YUNO] 🖱️ Pay button clicked", {
     buttonId: btn.id,
     buttonName: btn.name,
     disabled: btn.disabled,
@@ -604,25 +604,25 @@ async function handlePayClick(e) {
     e.stopPropagation();
   }
 
-  //  Check if button is actually disabled (defensive check)
+  // ✅ Check if button is actually disabled (defensive check)
   if (btn.disabled) {
-    console.warn("[YUNO]  Button is disabled. Blocking click.");
+    console.warn("[YUNO] ⛔ Button is disabled. Blocking click.");
     e.preventDefault();
     e.stopPropagation();
     return;
   }
 
   if (state.paid) {
-    console.warn("[YUNO]  Order already paid. Blocking.");
+    console.warn("[YUNO] ⛔ Order already paid. Blocking.");
     return;
   }
 
   if (state.paying) {
-    console.warn("[YUNO]  Payment in progress. Blocking double click.");
+    console.warn("[YUNO] ⛔ Payment in progress. Blocking double click.");
     return;
   }
 
-  console.log("[YUNO]  CLICK pay - proceeding");
+  console.log("[YUNO] ✅ CLICK pay - proceeding");
 
   if (!yunoInstance || !state.started) {
     await startYunoCheckout();
@@ -633,7 +633,7 @@ async function handlePayClick(e) {
     return;
   }
 
-  //  DON'T set state.paying here - let Yuno validate first
+  // ✅ DON'T set state.paying here - let Yuno validate first
   console.log("[YUNO] Starting payment");
   yunoInstance.startPayment();
 }
@@ -641,20 +641,20 @@ async function handlePayClick(e) {
 // Prevent Enter key from submitting form/triggering payment
 function handleKeyPress(e) {
   if (e.key === "Enter" || e.keyCode === 13) {
-    console.log("[YUNO]  Enter key pressed, checking if should allow...");
+    console.log("[YUNO] 🔑 Enter key pressed, checking if should allow...");
 
     const btn = document.getElementById("button-pay");
 
     // Only allow Enter if button is enabled
     if (!btn || btn.disabled || state.paying) {
-      console.log("[YUNO]  Blocking Enter key (button disabled or payment in progress)");
+      console.log("[YUNO] ⛔ Blocking Enter key (button disabled or payment in progress)");
       e.preventDefault();
       e.stopPropagation();
       return false;
     }
 
     // If button is enabled, Enter can proceed (will trigger click event)
-    console.log("[YUNO]  Enter key allowed (button is enabled)");
+    console.log("[YUNO] ✅ Enter key allowed (button is enabled)");
   }
 }
 
@@ -663,7 +663,7 @@ if (!window.__THIX_YUNO_BINDINGS__) {
   window.__THIX_YUNO_BINDINGS__ = true;
   document.addEventListener("click", handlePayClick);
 
-  //  Prevent Enter key from submitting with invalid fields
+  // ✅ Prevent Enter key from submitting with invalid fields
   document.addEventListener("keydown", handleKeyPress, true);  // true = capture phase
   document.addEventListener("keypress", handleKeyPress, true);  // Backup for older browsers
 }
