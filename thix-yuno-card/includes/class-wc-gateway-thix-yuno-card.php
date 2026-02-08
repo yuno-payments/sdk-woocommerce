@@ -248,35 +248,53 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
 
     $order_number = (int) $order->get_id();
     $total_html   = wp_kses_post($order->get_formatted_order_total());
+    $order_date   = $order->get_date_created() ? $order->get_date_created()->date_i18n(wc_date_format()) : '';
+    $payment_method_title = $this->get_title();
 
     echo '<div class="thix-yuno-receipt">';
-    echo '<h3>' . esc_html__('Pay with Yuno', 'thix-yuno') . '</h3>';
-    echo '<p>' . esc_html__('Order', 'thix-yuno') . ' #<span id="yuno-order-number">' . esc_html($order_number) . '</span> — ' .
-         esc_html__('Total', 'thix-yuno') . ': <strong><span id="yuno-order-total">' . $total_html . '</span></strong></p>';
 
-    echo '<div id="loader" style="display:none; margin:12px 0;">' . esc_html__('Loading Yuno…', 'thix-yuno') . '</div>';
+    // Page heading
+    echo '<h2 class="thix-yuno-page-title">' . esc_html__('Complete your payment', 'thix-yuno') . '</h2>';
+
+    // Order Summary - 4 items in desktop, responsive in mobile
+    echo '<div class="thix-yuno-order-summary">';
+
+    // Order Number
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Order', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value" id="thix-yuno-order-number">#' . esc_html($order_number) . '</span>';
+    echo '</div>';
+
+    // Order Date
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Date', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value">' . esc_html($order_date) . '</span>';
+    echo '</div>';
+
+    // Total
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Total', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value thix-yuno-order-total" id="thix-yuno-order-total">' . $total_html . '</span>';
+    echo '</div>';
+
+    // Payment Method
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Payment Method', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value">' . esc_html($payment_method_title) . '</span>';
+    echo '</div>';
+
+    echo '</div>'; // .thix-yuno-order-summary
+
+    echo '<div id="thix-yuno-loader" class="thix-yuno-loader" style="display:none;">' . esc_html__('Loading payment…', 'thix-yuno') . '</div>';
     echo '<div id="thix-yuno-root"></div>';
     echo '<div id="thix-yuno-apm-form"></div>';
     echo '<div id="thix-yuno-action-form"></div>';
 
-    echo '<button type="button" id="thix-yuno-button-pay" style="
-         display:none;
-         width:100%;
-         margin-top:16px;
-         padding:14px 20px;
-         background-color:#000000;
-         color:#ffffff;
-         border:none;
-         border-radius:8px;
-         font-size:16px;
-         font-weight:600;
-         cursor:pointer;
-         transition:background-color 0.2s ease, opacity 0.2s ease;
-      ">' .
+    echo '<button type="button" id="thix-yuno-button-pay" class="thix-yuno-pay-button" style="display:none;">' .
          esc_html__('Pay', 'thix-yuno') .
          '</button>';
 
-    echo '</div>';
+    echo '</div>'; // .thix-yuno-receipt
   }
 
   public function enqueue_scripts() {
@@ -290,6 +308,14 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     if (!$order) return;
 
     if ($order->get_payment_method() !== $this->id) return;
+
+    // Enqueue scoped CSS to prevent theme conflicts (double borders, focus rings)
+    wp_enqueue_style(
+      'thix-yuno-checkout',
+      plugin_dir_url(__DIR__) . 'assets/css/checkout.css',
+      [],
+      filemtime(plugin_dir_path(__DIR__) . 'assets/css/checkout.css')
+    );
 
     wp_enqueue_script(
       'yuno-sdk',

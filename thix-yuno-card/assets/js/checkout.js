@@ -58,7 +58,7 @@ const state = {
 };
 
 function setLoaderVisible(visible) {
-  const loader = document.getElementById("loader");
+  const loader = document.getElementById("thix-yuno-loader");
   if (!loader) return;
   loader.style.display = visible ? "block" : "none";
 }
@@ -167,8 +167,8 @@ async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal,
   state.lastPaymentId = null;
 
   // Update visible order information in the UI
-  const orderNumberEl = document.getElementById("yuno-order-number");
-  const orderTotalEl = document.getElementById("yuno-order-total");
+  const orderNumberEl = document.getElementById("thix-yuno-order-number");
+  const orderTotalEl = document.getElementById("thix-yuno-order-total");
 
   if (orderNumberEl) {
     orderNumberEl.textContent = newOrderId;

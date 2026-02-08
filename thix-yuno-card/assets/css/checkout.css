@@ -1,0 +1,272 @@
+/**
+ * Yuno Payment Gateway - Checkout Styles
+ * Fully isolated, responsive, and theme-independent
+ *
+ * Breakpoints:
+ * - Mobile:  < 576px (1 column)
+ * - Tablet:  576px - 767px (2 columns)
+ * - Desktop: >= 768px (4 columns)
+ */
+
+/* ===== CONTAINER ===== */
+.thix-yuno-receipt {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 20px 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+@media (min-width: 768px) {
+  .thix-yuno-receipt {
+    max-width: 800px;
+    padding: 32px 24px;
+  }
+}
+
+/* ===== PAGE TITLE ===== */
+.thix-yuno-page-title {
+  font-size: 24px !important;
+  font-weight: 600 !important;
+  color: #1a1a1a !important;
+  margin: 0 0 24px 0 !important;
+  padding: 0 !important;
+  line-height: 1.2 !important;
+  text-align: center !important;
+}
+
+@media (min-width: 768px) {
+  .thix-yuno-page-title {
+    font-size: 28px !important;
+    margin: 0 0 32px 0 !important;
+  }
+}
+
+/* ===== ORDER SUMMARY CONTAINER ===== */
+.thix-yuno-order-summary {
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  box-sizing: border-box;
+}
+
+/* Mobile: 1 column */
+@media (max-width: 575px) {
+  .thix-yuno-order-summary {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+}
+
+/* Tablet: 2 columns */
+@media (min-width: 576px) and (max-width: 767px) {
+  .thix-yuno-order-summary {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+}
+
+/* Desktop: 4 columns with separators */
+@media (min-width: 768px) {
+  .thix-yuno-order-summary {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    padding: 24px 0;
+  }
+
+  /* Vertical separators between items (desktop only) */
+  .thix-yuno-order-item:not(:last-child) {
+    border-right: 1px solid #dee2e6;
+    padding-right: 20px;
+    margin-right: 20px;
+  }
+
+  .thix-yuno-order-item:first-child {
+    padding-left: 20px;
+  }
+
+  .thix-yuno-order-item:last-child {
+    padding-right: 20px;
+  }
+}
+
+/* ===== ORDER ITEM (Label + Value) ===== */
+.thix-yuno-order-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0; /* Allow text truncation if needed */
+}
+
+/* Label (uppercase, small, gray) */
+.thix-yuno-order-label {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: #6c757d !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.2 !important;
+}
+
+/* Value (larger, bold, dark) */
+.thix-yuno-order-value {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  color: #1a1a1a !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.3 !important;
+  word-break: break-word; /* Prevent overflow */
+}
+
+@media (min-width: 768px) {
+  .thix-yuno-order-value {
+    font-size: 18px !important;
+  }
+}
+
+/* Total: emphasize with color */
+.thix-yuno-order-total {
+  color: #000000 !important;
+  font-size: 18px !important;
+}
+
+@media (min-width: 768px) {
+  .thix-yuno-order-total {
+    font-size: 20px !important;
+  }
+}
+
+/* ===== LOADER ===== */
+.thix-yuno-loader {
+  font-size: 14px !important;
+  color: #6c757d !important;
+  text-align: center !important;
+  padding: 16px !important;
+  margin: 0 0 24px 0 !important;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+/* ===== PAY BUTTON ===== */
+.thix-yuno-pay-button {
+  width: 100% !important;
+  max-width: 400px !important;
+  margin: 24px auto 0 auto !important;
+  padding: 16px 24px !important;
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: background-color 0.2s ease, opacity 0.2s ease !important;
+  display: block !important;
+  text-align: center !important;
+  box-sizing: border-box !important;
+}
+
+.thix-yuno-pay-button:hover:not(:disabled) {
+  background-color: #333333 !important;
+}
+
+.thix-yuno-pay-button:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  background-color: #666666 !important;
+}
+
+/* ===== SDK ISOLATION ===== */
+/* Remove ALL theme-added styles from SDK inputs */
+.thix-yuno-receipt #thix-yuno-root input,
+.thix-yuno-receipt #thix-yuno-root input:focus,
+.thix-yuno-receipt #thix-yuno-root input:focus-visible,
+.thix-yuno-receipt #thix-yuno-root input:active,
+.thix-yuno-receipt #thix-yuno-root input:hover,
+.thix-yuno-receipt #thix-yuno-apm-form input,
+.thix-yuno-receipt #thix-yuno-apm-form input:focus,
+.thix-yuno-receipt #thix-yuno-apm-form input:focus-visible,
+.thix-yuno-receipt #thix-yuno-apm-form input:active,
+.thix-yuno-receipt #thix-yuno-apm-form input:hover,
+.thix-yuno-receipt #thix-yuno-action-form input,
+.thix-yuno-receipt #thix-yuno-action-form input:focus,
+.thix-yuno-receipt #thix-yuno-action-form input:focus-visible,
+.thix-yuno-receipt #thix-yuno-action-form input:active,
+.thix-yuno-receipt #thix-yuno-action-form input:hover {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  transition: none !important;
+  animation: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+}
+
+/* Remove theme focus rings from SDK elements */
+.thix-yuno-receipt #thix-yuno-root *:focus,
+.thix-yuno-receipt #thix-yuno-root *:focus-visible,
+.thix-yuno-receipt #thix-yuno-apm-form *:focus,
+.thix-yuno-receipt #thix-yuno-apm-form *:focus-visible,
+.thix-yuno-receipt #thix-yuno-action-form *:focus,
+.thix-yuno-receipt #thix-yuno-action-form *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure consistent box-sizing */
+.thix-yuno-receipt #thix-yuno-root *,
+.thix-yuno-receipt #thix-yuno-apm-form *,
+.thix-yuno-receipt #thix-yuno-action-form * {
+  box-sizing: border-box !important;
+}
+
+/* Ensure SDK iframes are not affected by theme styles */
+.thix-yuno-receipt iframe {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* ===== HIDE WOOCOMMERCE NATIVE ORDER OVERVIEW ===== */
+/* Hide WooCommerce's default order summary to avoid duplication */
+/* CRITICAL: Only hides when our custom summary (.thix-yuno-receipt) is present */
+/* This prevents breaking other WooCommerce pages (my-account, order-received, etc.) */
+
+/* Main order overview block (Order, Date, Total, Payment Method) */
+body.woocommerce-order-pay .woocommerce-order-overview {
+  display: none !important;
+}
+
+/* Order details table/list (if shown above our custom summary) */
+body.woocommerce-order-pay .woocommerce-order-details {
+  display: none !important;
+}
+
+/* Alternative selector for order overview */
+body.woocommerce-order-pay ul.order_details {
+  display: none !important;
+}
+
+/* Hide "Order received" heading if present (only on order-pay page) */
+body.woocommerce-order-pay .woocommerce-order h2:first-of-type {
+  display: none !important;
+}
+
+/* Ensure our custom summary is always visible */
+.thix-yuno-order-summary {
+  display: grid !important;
+}
