@@ -23,4 +23,7 @@ add_action('plugins_loaded', function () {
     $gateways[] = 'WC_Gateway_Thix_Yuno_Card';
     return $gateways;
   });
+
+  // Remove WooCommerce privacy policy text from checkout
+  add_filter('woocommerce_get_privacy_policy_text', '__return_empty_string', 10);
 });

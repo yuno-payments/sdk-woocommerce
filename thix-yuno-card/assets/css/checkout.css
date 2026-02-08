@@ -171,7 +171,6 @@
   font-weight: 600 !important;
   cursor: pointer !important;
   transition: background-color 0.2s ease, opacity 0.2s ease !important;
-  display: block !important;
   text-align: center !important;
   box-sizing: border-box !important;
 }
@@ -214,6 +213,42 @@
   appearance: none !important;
   -webkit-appearance: none !important;
   -moz-appearance: none !important;
+}
+
+/* CRITICAL: Remove browser autofill/autocomplete background colors */
+/* Chrome, Safari, Edge - autofill background override */
+.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill,
+.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill:hover,
+.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill:focus,
+.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill:active,
+.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill,
+.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill:hover,
+.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill:focus,
+.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill:active,
+.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill,
+.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill:hover,
+.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill:focus,
+.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px transparent inset !important;
+  box-shadow: 0 0 0 1000px transparent inset !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  background-clip: content-box !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+  -webkit-text-fill-color: inherit !important;
+  color: inherit !important;
+}
+
+/* Firefox - autofill background override */
+.thix-yuno-receipt #thix-yuno-root input:-moz-autofill,
+.thix-yuno-receipt #thix-yuno-root input:-moz-autofill-preview,
+.thix-yuno-receipt #thix-yuno-apm-form input:-moz-autofill,
+.thix-yuno-receipt #thix-yuno-apm-form input:-moz-autofill-preview,
+.thix-yuno-receipt #thix-yuno-action-form input:-moz-autofill,
+.thix-yuno-receipt #thix-yuno-action-form input:-moz-autofill-preview {
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
 }
 
 /* Remove theme focus rings from SDK elements */
@@ -269,4 +304,85 @@ body.woocommerce-order-pay .woocommerce-order h2:first-of-type {
 /* Ensure our custom summary is always visible */
 .thix-yuno-order-summary {
   display: grid !important;
+}
+
+/* ===== WOOCOMMERCE CHECKOUT PAGE STYLES ===== */
+/* Styles for payment method selection on /checkout page */
+
+/* Payment section container - reduce padding, remove dark background, keep border */
+body.woocommerce-checkout #payment.woocommerce-checkout-payment {
+  background-color: transparent !important;
+  border: 1px solid #e0e0e0 !important;
+  padding: 16px !important;
+  margin-bottom: 20px !important;
+}
+
+/* Payment methods list - reduce spacing */
+body.woocommerce-checkout ul.wc_payment_methods.payment_methods {
+  padding: 0 !important;
+  margin: 0 0 16px 0 !important;
+  background-color: transparent !important;
+}
+
+/* Individual payment method item - remove background, reduce padding */
+body.woocommerce-checkout .wc_payment_method {
+  background-color: transparent !important;
+  padding: 10px 12px !important;
+  margin-bottom: 0 !important;
+  border: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+/* Payment method label - reduce spacing */
+body.woocommerce-checkout .wc_payment_method label {
+  padding: 0 !important;
+  margin: 0 !important;
+  font-weight: 500 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 1 !important;
+  color: inherit !important;
+}
+
+/* Add card icon before Yuno Card label */
+body.woocommerce-checkout .wc_payment_method.payment_method_thix_yuno_card label::before {
+  content: "💳" !important;
+  font-size: 18px !important;
+  display: inline-block !important;
+  line-height: 1 !important;
+  filter: brightness(1.1) !important;
+}
+
+/* Show radio button for payment methods (override inline display:none) - move to right */
+body.woocommerce-checkout .wc_payment_method input.input-radio[type="radio"] {
+  display: inline-block !important;
+  width: auto !important;
+  margin: 0 0 0 auto !important;
+  cursor: pointer !important;
+  order: 2 !important;
+  flex-shrink: 0 !important;
+  accent-color: #000000 !important;
+}
+
+/* Place order button container - reduce padding */
+body.woocommerce-checkout .form-row.place-order {
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: transparent !important;
+}
+
+/* Terms and conditions wrapper */
+body.woocommerce-checkout .woocommerce-terms-and-conditions-wrapper {
+  padding: 0 0 16px 0 !important;
+  margin: 0 !important;
+  background-color: transparent !important;
+}
+
+/* Place order button - reduce padding */
+body.woocommerce-checkout #place_order {
+  padding: 14px 24px !important;
+  margin-top: 0 !important;
 }

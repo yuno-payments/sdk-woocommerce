@@ -213,10 +213,24 @@ async function startYunoCheckout() {
 
         console.log("[YUNO] check-order-status ", statusRes);
 
-        // If order is already paid, redirect immediately
+        // If order is already paid, redirect to order-received
         if (statusRes.is_paid && statusRes.redirect) {
-          console.log("[YUNO] Order already paid, redirecting...");
+          console.log("[YUNO] Order already paid, redirecting to order-received...");
           window.location.href = statusRes.redirect;
+          return;
+        }
+
+        //  RACE CONDITION FIX: If order has payment_id, redirect immediately to order-received
+        // This handles when user clicks "back" before frontend completes /confirm
+        // Trust that payment is processing and let order-received show the correct status
+        if (statusRes.has_payment_id) {
+          console.log("[YUNO] Order has payment in progress, redirecting to order-received...");
+
+          // Build order-received URL (same format as WooCommerce uses)
+          const orderReceivedUrl = statusRes.redirect ||
+            `${window.location.origin}/checkout/order-received/${state.orderId}/?key=${state.orderKey}`;
+
+          window.location.href = orderReceivedUrl;
           return;
         }
 
@@ -311,7 +325,7 @@ async function startYunoCheckout() {
       checkoutSession: state.checkoutSession,
       elementSelector: "#thix-yuno-root",
       countryCode: state.countryCode,
-      language: "es",
+      language: ctx.language || "es", // Use WordPress language, fallback to Spanish
       showLoading: true,
       keepLoader: true,
 

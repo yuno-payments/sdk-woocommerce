@@ -890,9 +890,10 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
         ]);
 
         return thix_yuno_json([
-            'is_paid' => false,
-            'status'  => $status,
-            'message' => 'Order ready for payment',
+            'is_paid'        => false,
+            'status'         => $status,
+            'has_payment_id' => !empty($payment_id),
+            'message'        => 'Order ready for payment',
         ], 200);
     }
 
@@ -965,9 +966,11 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
     // For intermediate states, we allow payment (user might be retrying)
     // but we could also choose to block and show "payment processing" message
     return thix_yuno_json([
-        'is_paid' => false,
-        'status'  => $status,
-        'message' => 'Order ready for payment',
+        'is_paid'        => false,
+        'status'         => $status,
+        'has_payment_id' => !empty($payment_id),
+        'redirect'       => $order->get_checkout_order_received_url(),
+        'message'        => 'Order ready for payment',
         'verified_status' => $verified_status,
     ], 200);
 }

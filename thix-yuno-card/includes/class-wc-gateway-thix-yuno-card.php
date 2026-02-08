@@ -246,6 +246,21 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       return;
     }
 
+    // If order is already paid, redirect immediately to order-received page
+    // This prevents showing the payment page again when user refreshes or goes back
+    $order_status = $order->get_status();
+
+    // Debug: log order status
+    error_log('[YUNO] receipt_page - Order ID: ' . $order->get_id() . ', Status: ' . $order_status);
+
+    if (in_array($order_status, ['processing', 'completed', 'on-hold'], true)) {
+      error_log('[YUNO] receipt_page - Redirecting to order-received (order already paid)');
+      wp_safe_redirect($order->get_checkout_order_received_url());
+      exit;
+    }
+
+    error_log('[YUNO] receipt_page - Showing payment page (order status: ' . $order_status . ')');
+
     $order_number = (int) $order->get_id();
     $total_html   = wp_kses_post($order->get_formatted_order_total());
     $order_date   = $order->get_date_created() ? $order->get_date_created()->date_i18n(wc_date_format()) : '';
@@ -298,6 +313,18 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
   }
 
   public function enqueue_scripts() {
+    // Load CSS on checkout page (for payment method styling)
+    if (function_exists('is_checkout') && is_checkout() && !is_order_received_page() && !is_checkout_pay_page()) {
+      wp_enqueue_style(
+        'thix-yuno-checkout',
+        plugin_dir_url(__DIR__) . 'assets/css/checkout.css',
+        [],
+        filemtime(plugin_dir_path(__DIR__) . 'assets/css/checkout.css')
+      );
+      return; // Only CSS needed on checkout page
+    }
+
+    // Load full scripts and SDK on order-pay page
     if (!function_exists('is_checkout_pay_page') || !is_checkout_pay_page()) return;
 
     global $wp;
@@ -344,6 +371,10 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     $country = (string) ($order->get_billing_country() ?: 'CO');
     $email   = (string) ($order->get_billing_email() ?: '');
 
+    // Get WordPress locale and convert to ISO 639-1 format (es, en, pt)
+    $wp_locale = get_locale(); // e.g., es_ES, en_US, pt_BR
+    $language = substr($wp_locale, 0, 2); // Extract first 2 chars: es, en, pt
+
     wp_localize_script('thix-yuno-checkout', 'THIX_YUNO_WC', [
       'restBase' => esc_url_raw(rest_url('thix-yuno/v1')),
       'nonce'    => wp_create_nonce('wp_rest'),
@@ -355,6 +386,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'total'     => (float) $order->get_total(),
       'country'   => $country,
       'email'     => $email,
+      'language'  => $language,
 
       'debug' => (self::get_setting('debug', 'no') === 'yes'),
     ]);
