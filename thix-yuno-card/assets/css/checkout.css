@@ -160,8 +160,7 @@
 /* ===== PAY BUTTON ===== */
 .thix-yuno-pay-button {
   width: 100% !important;
-  max-width: 400px !important;
-  margin: 24px auto 0 auto !important;
+  margin: 24px 0 0 0 !important;
   padding: 16px 24px !important;
   background-color: #000000 !important;
   color: #ffffff !important;
