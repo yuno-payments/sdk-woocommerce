@@ -385,3 +385,11 @@ body.woocommerce-checkout #place_order {
   padding: 14px 24px !important;
   margin-top: 0 !important;
 }
+
+/* ===== HIDE PRIVACY POLICY TEXT ===== */
+/* Hide WooCommerce privacy policy text on checkout and order-pay pages */
+/* Only applies to pages where Yuno CSS is loaded */
+body.woocommerce-checkout .woocommerce-privacy-policy-text,
+body.woocommerce-order-pay .woocommerce-privacy-policy-text {
+  display: none !important;
+}

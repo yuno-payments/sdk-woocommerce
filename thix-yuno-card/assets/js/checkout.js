@@ -8,8 +8,6 @@
   }
   window.THIX_YUNO_CHECKOUT_LOADED = true;
 
-  console.log("THIX YUNO checkout.js loaded ", window.THIX_YUNO_WC);
-
   // Guard: Check if API functions are available
   if (!window.THIX_YUNO_API) {
     console.error("[YUNO] THIX_YUNO_API not found. api.js not loaded.");
@@ -315,9 +313,7 @@ async function startYunoCheckout() {
     let isPayingInsideSdk = false;
     setLoaderVisible(true);
 
-    //  SDK requires explicit render mode type
-    // "modal" = opens popup with payment fields
-    // "element" = embeds payment fields directly in page
+    // Render mode: "modal" (popup) or "element" (embedded)
     const RENDER_MODE_TYPE = "modal";
     state.renderMode = RENDER_MODE_TYPE; // Store in state for access elsewhere
 
@@ -346,32 +342,38 @@ async function startYunoCheckout() {
         styles: "",
         hideCardholderName: false,  // Ensure cardholder name field is shown
         cardholderName: {
-          required: true  // Enforce cardholder name validation
+          required: true
         },
-        //  CARD VALIDATION: Enable "Pay" button only when card fields are valid
-        // Note: In modal mode, this validation is skipped because fields are inside the modal
+        // Card validation: controls "Pay" button state based on field validity
         onChange: ({ error, data, isDirty }) => {
-          console.log("[YUNO]  Card onChange event - DETAILED:", {
-            hasError: !!error,
-            errorValue: error,
-            dataKeys: data ? Object.keys(data) : [],
-            fullData: data,
-            isDirty,
-            selectedMethod: state.selectedPaymentMethod,
-            isPaying: state.paying,
-            renderMode: RENDER_MODE_TYPE,
-            timestamp: new Date().toISOString()
-          });
+          // Only log detailed card data when debug mode is enabled
+          if (ctx.debug) {
+            console.log("[YUNO]  Card onChange event - DETAILED:", {
+              hasError: !!error,
+              errorValue: error,
+              dataKeys: data ? Object.keys(data) : [],
+              fullData: data,
+              isDirty,
+              selectedMethod: state.selectedPaymentMethod,
+              isPaying: state.paying,
+              renderMode: RENDER_MODE_TYPE,
+              timestamp: new Date().toISOString()
+            });
+          }
 
-          //  In MODAL mode: only re-enable button when fields are valid
-          // Don't disable on validation errors (SDK handles that on submit)
-          // Allow this logic even during payment (state.paying=true) to re-enable after user fixes fields
+          // Modal mode: SDK handles validation, only re-enable button when valid
           if (RENDER_MODE_TYPE === "modal") {
-            console.log("[YUNO]  Modal mode: checking if should re-enable button");
+            if (ctx.debug) console.log("[YUNO] Modal mode: checking if should re-enable button");
+
+            // Prevent race condition: don't reset state.paying during active payment
+            if (state.paying) {
+              if (ctx.debug) console.log("[YUNO] Payment in progress, skipping onChange re-enable in modal mode");
+              return;
+            }
+
             // Only re-enable when fields are valid (for retry after error)
             if (!error && (!state.selectedPaymentMethod || state.selectedPaymentMethod === 'CARD')) {
-              console.log("[YUNO]  Card fields valid in modal, re-enabling button and resetting state");
-              state.paying = false; // Reset paying state so user can click Pay again
+              if (ctx.debug) console.log("[YUNO] Card fields valid in modal, re-enabling button");
               setPayButtonDisabled(false);
             }
             return;
@@ -379,19 +381,17 @@ async function startYunoCheckout() {
 
           // Skip validation in ELEMENT mode if payment is in progress
           if (state.paying) {
-            console.log("[YUNO]  Payment in progress, skipping element mode validation");
+            if (ctx.debug) console.log("[YUNO] Payment in progress, skipping element mode validation");
             return;
           }
 
-          //  Apply full validation for ELEMENT mode with CARD method
+          // Element mode: validate card fields
           if (!state.selectedPaymentMethod || state.selectedPaymentMethod === 'CARD') {
-            //  Simplified validation: Trust Yuno SDK primarily
-
             if (error) {
-              console.log("[YUNO] Card validation error");
+              if (ctx.debug) console.log("[YUNO] Card validation error");
               setPayButtonDisabled(true);
             } else {
-              console.log("[YUNO] Card valid");
+              if (ctx.debug) console.log("[YUNO] Card valid");
               setPayButtonDisabled(false);
             }
           }

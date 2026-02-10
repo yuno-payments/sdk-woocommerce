@@ -26,11 +26,6 @@ function thix_yuno_get_env($key, $default = '') {
             $k = $map[$key];
             if (array_key_exists($k, $settings) && $settings[$k] !== '') return $settings[$k];
         }
-
-        // Backwards compatibility: if requesting ACCOUNT_ID, try old account_code
-        if ($key === 'ACCOUNT_ID' && array_key_exists('account_code', $settings) && $settings['account_code'] !== '') {
-            return $settings['account_code'];
-        }
     }
 
     $v = getenv($key);
@@ -117,6 +112,13 @@ function thix_yuno_get_wc_price_decimals() {
  * @return string The extracted status in uppercase, or 'UNKNOWN' if not found
  */
 function thix_yuno_extract_payment_status($raw) {
+    // Validate that $raw is an array before accessing elements
+    // When Yuno API returns non-JSON (e.g., "Error: timeout"), $raw becomes a string
+    // Accessing array keys on a string returns the first character, causing incorrect status
+    if (!is_array($raw)) {
+        return 'UNKNOWN';
+    }
+
     $status_candidates = [
         $raw['status'] ?? null,
         $raw['state'] ?? null,
@@ -135,17 +137,6 @@ function thix_yuno_extract_payment_status($raw) {
     }
 
     return 'UNKNOWN';
-}
-
-/**
- * Legacy helper to convert to minor units (no longer used for amount.value sent to Yuno).
- * Kept in case you want to use it in logs or internal calculations.
- */
-function thix_yuno_to_minor_units($total_major) {
-    $decimals = thix_yuno_get_wc_price_decimals();
-    $mult     = pow(10, $decimals);
-    $minor    = (int) round(((float)$total_major) * $mult);
-    return [$minor, $decimals];
 }
 
 function thix_yuno_get_order_from_request(WP_REST_Request $request) {

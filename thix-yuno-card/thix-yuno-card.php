@@ -17,13 +17,9 @@ add_action('plugins_loaded', function () {
   require_once plugin_dir_path(__FILE__) . 'includes/class-wc-gateway-thix-yuno-card.php';
   require_once plugin_dir_path(__FILE__) . 'includes/rest-api.php';
 
-
   // Payment Gateway Registration
   add_filter('woocommerce_payment_gateways', function ($gateways) {
     $gateways[] = 'WC_Gateway_Thix_Yuno_Card';
     return $gateways;
   });
-
-  // Remove WooCommerce privacy policy text from checkout
-  add_filter('woocommerce_get_privacy_policy_text', '__return_empty_string', 10);
 });
