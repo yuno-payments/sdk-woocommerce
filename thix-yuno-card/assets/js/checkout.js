@@ -211,24 +211,19 @@ async function startYunoCheckout() {
 
         console.log("[YUNO] check-order-status ", statusRes);
 
-        // If order is already paid, redirect to order-received
+        // Only redirect if order is verified as paid OR backend explicitly provides redirect URL
+        // Do NOT redirect on unverified payment (when Yuno API verification fails)
         if (statusRes.is_paid && statusRes.redirect) {
           console.log("[YUNO] Order already paid, redirecting to order-received...");
           window.location.href = statusRes.redirect;
           return;
         }
 
-        //  RACE CONDITION FIX: If order has payment_id, redirect immediately to order-received
-        // This handles when user clicks "back" before frontend completes /confirm
-        // Trust that payment is processing and let order-received show the correct status
-        if (statusRes.has_payment_id) {
-          console.log("[YUNO] Order has payment in progress, redirecting to order-received...");
-
-          // Build order-received URL (same format as WooCommerce uses)
-          const orderReceivedUrl = statusRes.redirect ||
-            `${window.location.origin}/checkout/order-received/${state.orderId}/?key=${state.orderKey}`;
-
-          window.location.href = orderReceivedUrl;
+        // Redirect only if backend explicitly provides a redirect URL (verified payment state)
+        // This prevents premature redirect when payment status is UNKNOWN due to API failure
+        if (statusRes.redirect && !statusRes.is_paid) {
+          console.log("[YUNO] Backend requested redirect (payment processing/verified)...");
+          window.location.href = statusRes.redirect;
           return;
         }
 

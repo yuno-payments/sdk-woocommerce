@@ -1060,8 +1060,14 @@ function thix_yuno_duplicate_order(WP_REST_Request $request) {
         // Set currency
         $new_order->set_currency($order->get_currency());
 
-        // Calculate totals
-        $new_order->calculate_totals();
+        // Copy totals from original order (do NOT recalculate)
+        // Using calculate_totals() would apply current tax rates/coupons, potentially changing amounts
+        $new_order->set_discount_total($order->get_discount_total());
+        $new_order->set_discount_tax($order->get_discount_tax());
+        $new_order->set_shipping_total($order->get_shipping_total());
+        $new_order->set_shipping_tax($order->get_shipping_tax());
+        $new_order->set_cart_tax($order->get_cart_tax());
+        $new_order->set_total($order->get_total());
 
         // Set status to pending
         $new_order->set_status('pending', 'Order created from failed order #' . $order->get_id());
