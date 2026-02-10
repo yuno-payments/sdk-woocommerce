@@ -45,23 +45,10 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'default'     => 'Yuno Card',
         'desc_tip'    => true,
       ],
-      'environment' => [
-        'title'       => 'Environment',
-        'type'        => 'select',
-        'description' => 'Select the Yuno environment.',
-        'default'     => 'sandbox',
-        'desc_tip'    => true,
-        'options'     => [
-          'sandbox' => 'Sandbox',
-          'prod'    => 'Production',
-          'staging' => 'Staging',
-          'dev'     => 'Dev',
-        ],
-      ],
-      'account_code' => [
-        'title'       => 'ACCOUNT_CODE',
+      'account_id' => [
+        'title'       => 'ACCOUNT_ID',
         'type'        => 'text',
-        'description' => 'Yuno account code.',
+        'description' => 'Yuno account ID.',
         'default'     => '',
         'desc_tip'    => true,
       ],
@@ -80,7 +67,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'desc_tip'    => true,
       ],
 
-      // ✅ Split (MVP)
       'split_enabled' => [
         'title'       => 'Split Payments',
         'type'        => 'checkbox',
@@ -96,7 +82,6 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
         'desc_tip'    => true,
       ],
 
-      // ✅ New recommended: commission %
       'split_commission_percent' => [
         'title'       => 'Commission % (Platform)',
         'type'        => 'text',
@@ -190,13 +175,14 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
   public static function get_setting($key, $default = '') {
     $s = self::get_settings_array();
     if (isset($s[$key]) && $s[$key] !== '') return $s[$key];
+
     return $default;
   }
 
   public function is_available() {
     if ('yes' !== $this->enabled) return false;
 
-    $account = (string) $this->get_option('account_code', '');
+    $account = (string) $this->get_option('account_id', '');
     $pub     = (string) $this->get_option('public_api_key', '');
     $priv    = (string) $this->get_option('private_secret_key', '');
 
@@ -237,31 +223,95 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       return;
     }
 
+    // If order is already paid, redirect immediately to order-received page
+    // This prevents showing the payment page again when user refreshes or goes back
+    $order_status = $order->get_status();
+
+    thix_yuno_log('debug', 'receipt_page - checking order status', [
+      'order_id' => $order->get_id(),
+      'status'   => $order_status,
+    ]);
+
+    if (in_array($order_status, ['processing', 'completed', 'on-hold'], true)) {
+      thix_yuno_log('info', 'receipt_page - redirecting to order-received (order already paid)', [
+        'order_id' => $order->get_id(),
+        'status'   => $order_status,
+      ]);
+
+      // Check if headers were already sent (receipt_page runs after get_header())
+      // If headers sent, use JavaScript redirect to avoid PHP warning
+      if (!headers_sent()) {
+        wp_safe_redirect($order->get_checkout_order_received_url());
+        exit;
+      } else {
+        // Fallback: JavaScript redirect (works even after headers sent)
+        echo '<script type="text/javascript">window.location.href = "' . esc_url($order->get_checkout_order_received_url()) . '";</script>';
+        echo '<noscript><meta http-equiv="refresh" content="0;url=' . esc_url($order->get_checkout_order_received_url()) . '"></noscript>';
+        return;
+      }
+    }
+
+    thix_yuno_log('debug', 'receipt_page - showing payment page', [
+      'order_id' => $order->get_id(),
+      'status'   => $order_status,
+    ]);
+
     $order_number = (int) $order->get_id();
     $total_html   = wp_kses_post($order->get_formatted_order_total());
+    $order_date   = $order->get_date_created() ? $order->get_date_created()->date_i18n(wc_date_format()) : '';
+    $payment_method_title = $this->get_title();
 
     echo '<div class="thix-yuno-receipt">';
-    echo '<h3>' . esc_html__('Pay with Yuno', 'thix-yuno') . '</h3>';
-    echo '<p>' . esc_html__('Order', 'thix-yuno') . ' #' . esc_html($order_number) . ' — ' .
-         esc_html__('Total', 'thix-yuno') . ': <strong>' . $total_html . '</strong></p>';
+    echo '<h2 class="thix-yuno-page-title">' . esc_html__('Complete your payment', 'thix-yuno') . '</h2>';
+    echo '<div class="thix-yuno-order-summary">';
 
-    echo '<div id="loader" style="display:none; margin:12px 0;">' . esc_html__('Loading Yuno…', 'thix-yuno') . '</div>';
-    echo '<div id="root"></div>';
-    echo '<div id="form-element"></div>';
-    echo '<div id="action-form-element"></div>';
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Order', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value" id="thix-yuno-order-number">#' . esc_html($order_number) . '</span>';
+    echo '</div>';
 
-    echo '<button type="button" id="button-pay" style="margin-top:12px; padding:10px 14px;">' .
-         esc_html__('Pay Now', 'thix-yuno') .
-         '</button>';
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Date', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value">' . esc_html($order_date) . '</span>';
+    echo '</div>';
 
-    echo '<p style="margin-top:10px; opacity:.7;">' .
-         esc_html__('Do not close this page until the payment finishes.', 'thix-yuno') .
-         '</p>';
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Total', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value thix-yuno-order-total" id="thix-yuno-order-total">' . $total_html . '</span>';
+    echo '</div>';
+
+    echo '<div class="thix-yuno-order-item">';
+    echo '<span class="thix-yuno-order-label">' . esc_html__('Payment Method', 'thix-yuno') . '</span>';
+    echo '<span class="thix-yuno-order-value">' . esc_html($payment_method_title) . '</span>';
+    echo '</div>';
 
     echo '</div>';
+
+    echo '<div id="thix-yuno-loader" class="thix-yuno-loader" style="display:none;">' . esc_html__('Loading payment…', 'thix-yuno') . '</div>';
+    echo '<div id="thix-yuno-root"></div>';
+    echo '<div id="thix-yuno-apm-form"></div>';
+    echo '<div id="thix-yuno-action-form"></div>';
+
+    echo '<button type="button" id="thix-yuno-button-pay" class="thix-yuno-pay-button" style="display:none;">' .
+         esc_html__('Pay', 'thix-yuno') .
+         '</button>';
+
+    echo '</div>'; // .thix-yuno-receipt
   }
 
   public function enqueue_scripts() {
+    // Load CSS on checkout page (for payment method styling)
+    if (function_exists('is_checkout') && is_checkout() && !is_order_received_page() && !is_checkout_pay_page()) {
+      wp_enqueue_style(
+        'thix-yuno-checkout',
+        plugin_dir_url(__DIR__) . 'assets/css/checkout.css',
+        [],
+        filemtime(plugin_dir_path(__DIR__) . 'assets/css/checkout.css')
+      );
+      return;
+    }
+
+    // Load full scripts and SDK on order-pay page
     if (!function_exists('is_checkout_pay_page') || !is_checkout_pay_page()) return;
 
     global $wp;
@@ -272,6 +322,14 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
     if (!$order) return;
 
     if ($order->get_payment_method() !== $this->id) return;
+
+    // Enqueue scoped CSS to prevent theme conflicts (double borders, focus rings)
+    wp_enqueue_style(
+      'thix-yuno-checkout',
+      plugin_dir_url(__DIR__) . 'assets/css/checkout.css',
+      [],
+      filemtime(plugin_dir_path(__DIR__) . 'assets/css/checkout.css')
+    );
 
     wp_enqueue_script(
       'yuno-sdk',
@@ -285,7 +343,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'thix-yuno-api',
       plugin_dir_url(__DIR__) . 'assets/js/api.js',
       [],
-      '0.2.2',
+      filemtime(plugin_dir_path(__DIR__) . 'assets/js/api.js'),
       true
     );
 
@@ -293,23 +351,16 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'thix-yuno-checkout',
       plugin_dir_url(__DIR__) . 'assets/js/checkout.js',
       ['thix-yuno-api', 'yuno-sdk'],
-      '0.2.2',
+      filemtime(plugin_dir_path(__DIR__) . 'assets/js/checkout.js'),
       true
     );
 
-    static $module_filter_added = false;
-    if (!$module_filter_added) {
-      $module_filter_added = true;
-      add_filter('script_loader_tag', function ($tag, $handle, $src) {
-        if (in_array($handle, ['thix-yuno-api', 'thix-yuno-checkout'], true)) {
-          return '<script type="module" src="' . esc_url($src) . '"></script>';
-        }
-        return $tag;
-      }, 10, 3);
-    }
-
     $country = (string) ($order->get_billing_country() ?: 'CO');
     $email   = (string) ($order->get_billing_email() ?: '');
+
+    // Get WordPress locale and convert to ISO 639-1 format (es, en, pt)
+    $wp_locale = get_locale(); // e.g., es_ES, en_US, pt_BR
+    $language = substr($wp_locale, 0, 2); // Extract first 2 chars: es, en, pt
 
     wp_localize_script('thix-yuno-checkout', 'THIX_YUNO_WC', [
       'restBase' => esc_url_raw(rest_url('thix-yuno/v1')),
@@ -322,6 +373,7 @@ class WC_Gateway_Thix_Yuno_Card extends WC_Payment_Gateway {
       'total'     => (float) $order->get_total(),
       'country'   => $country,
       'email'     => $email,
+      'language'  => $language,
 
       'debug' => (self::get_setting('debug', 'no') === 'yes'),
     ]);

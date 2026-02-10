@@ -17,7 +17,6 @@ add_action('plugins_loaded', function () {
   require_once plugin_dir_path(__FILE__) . 'includes/class-wc-gateway-thix-yuno-card.php';
   require_once plugin_dir_path(__FILE__) . 'includes/rest-api.php';
 
-
   // Payment Gateway Registration
   add_filter('woocommerce_payment_gateways', function ($gateways) {
     $gateways[] = 'WC_Gateway_Thix_Yuno_Card';

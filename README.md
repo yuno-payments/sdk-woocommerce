@@ -115,7 +115,7 @@ WooCommerce → Settings → Payments → Card (Yuno)
 | **Enable** | Enable/disable the payment method |
 | **Checkout Title** | Name displayed to users at checkout |
 | **Environment** | Select Yuno environment (Sandbox, Production, Staging, Dev) |
-| **ACCOUNT_CODE** | Your Yuno account code |
+| **ACCOUNT_ID** | Your Yuno account ID |
 | **PUBLIC_API_KEY** | Public API key (used in frontend to initialize the SDK) |
 | **PRIVATE_SECRET_KEY** | Private secret key (backend only) |
 | **Debug** | Enable debug logs using WooCommerce logger |
@@ -127,7 +127,7 @@ For development or advanced setups, credentials can also be set via:
 **Option A – `wp-config.php`**
 
 ```php
-define('ACCOUNT_CODE', 'your_account_code');
+define('ACCOUNT_ID', 'your_account_id');
 define('PUBLIC_API_KEY', 'sandbox_xxx');
 define('PRIVATE_SECRET_KEY', 'xxx');
 ```
@@ -135,7 +135,7 @@ define('PRIVATE_SECRET_KEY', 'xxx');
 **Option B – Environment variables (Docker / wp-env)**
 
 ```bash
-ACCOUNT_CODE=xxx
+ACCOUNT_ID=xxx
 PUBLIC_API_KEY=sandbox_xxx
 PRIVATE_SECRET_KEY=xxx
 ```
