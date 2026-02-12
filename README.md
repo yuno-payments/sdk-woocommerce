@@ -1,4 +1,4 @@
-# Thix Yuno WooCommerce Gateway
+# Yuno WooCommerce Gateway
 
 Custom integration of **Yuno Payments** as a **card** payment method in **WooCommerce**, developed as a WordPress plugin.
 
@@ -46,7 +46,7 @@ WordPress REST API (rest-api.php)
 ## 📁 Plugin Structure
 
 ```
-thix-yuno-card/
+yuno-woocommerce/
 │
 ├── assets/
 │   └── js/
@@ -54,10 +54,10 @@ thix-yuno-card/
 │       └── checkout.js         # Initializes Yuno SDK and UI
 │
 ├── includes/
-│   ├── class-wc-gateway-thix-yuno-card.php  # WooCommerce Gateway class
+│   ├── class-wc-gateway-yuno-card.php  # WooCommerce Gateway class
 │   └── rest-api.php            # REST endpoints (checkout / payments)
 │
-└── thix-yuno-card.php          # Plugin bootstrap
+└── yuno-woocommerce.php          # Plugin bootstrap
 ```
 
 ---
@@ -68,7 +68,7 @@ thix-yuno-card/
 
 1. Clone the repository into:
    ```bash
-   wp-content/plugins/thix-yuno-card
+   wp-content/plugins/yuno-woocommerce
    ```
 
 2. Activate the plugin from WordPress Admin
@@ -165,9 +165,9 @@ Select the environment in the plugin settings. Yuno also detects the environment
 4. `checkout_session` is created from existing WooCommerce order
 5. User enters card details in Yuno SDK modal
 6. Yuno generates `oneTimeToken`
-7. Frontend calls `/thix-yuno/v1/payments` → WordPress creates payment via Yuno API
+7. Frontend calls `/yuno/v1/payments` → WordPress creates payment via Yuno API
 8. Yuno processes the payment
-9. Frontend calls `/thix-yuno/v1/confirm` → Order marked as paid/failed
+9. Frontend calls `/yuno/v1/confirm` → Order marked as paid/failed
 10. User redirected to `/order-received` (thank you page)
 
 > ⚠️ **Security Note (MVP):** The `/confirm` endpoint currently trusts the payment status sent from the frontend. For production, implement server-side verification via Yuno API lookup or webhooks.
@@ -178,9 +178,9 @@ Select the environment in the plugin settings. Yuno also detects the environment
 
 | Method | Endpoint                          | Description                        |
 |--------|-----------------------------------|------------------------------------|
-| GET    | `/thix-yuno/v1/public-api-key`    | Returns public key for the SDK     |
-| POST   | `/thix-yuno/v1/checkout-session`  | Creates a checkout session in Yuno |
-| POST   | `/thix-yuno/v1/payments`          | Creates payment using oneTimeToken |
+| GET    | `/yuno/v1/public-api-key`    | Returns public key for the SDK     |
+| POST   | `/yuno/v1/checkout-session`  | Creates a checkout session in Yuno |
+| POST   | `/yuno/v1/payments`          | Creates payment using oneTimeToken |
 
 ---
 

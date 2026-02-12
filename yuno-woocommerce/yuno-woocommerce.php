@@ -1,7 +1,7 @@
 <?php
 /**
- * Plugin Name: 3thix | Yuno Card Gateway (Dev)
- * Description: Development environment for the gateway.
+ * Plugin Name: Yuno WooCommerce Gateway
+ * Description: Yuno payment gateway integration for WooCommerce.
  * Version: 0.1.0
  */
 
@@ -14,12 +14,12 @@ add_action('plugins_loaded', function () {
   }
 
   // Load the gateway class
-  require_once plugin_dir_path(__FILE__) . 'includes/class-wc-gateway-thix-yuno-card.php';
+  require_once plugin_dir_path(__FILE__) . 'includes/class-wc-gateway-yuno-card.php';
   require_once plugin_dir_path(__FILE__) . 'includes/rest-api.php';
 
   // Payment Gateway Registration
   add_filter('woocommerce_payment_gateways', function ($gateways) {
-    $gateways[] = 'WC_Gateway_Thix_Yuno_Card';
+    $gateways[] = 'WC_Gateway_Yuno_Card';
     return $gateways;
   });
 });
