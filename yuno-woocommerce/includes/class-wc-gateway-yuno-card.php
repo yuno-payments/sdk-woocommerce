@@ -4,7 +4,7 @@ if (!defined('ABSPATH')) exit;
 class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
   public function __construct() {
-    $this->id                 = 'thix_yuno_card';
+    $this->id                 = 'yuno_card';
     $this->method_title       = 'Card (Yuno)';
     $this->method_description = 'Card payment using Yuno';
 
@@ -168,7 +168,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
    * Settings helpers for rest-api.php
    */
   public static function get_settings_array() {
-    $opt = get_option('woocommerce_thix_yuno_card_settings', []);
+    $opt = get_option('woocommerce_yuno_card_settings', []);
     return is_array($opt) ? $opt : [];
   }
 

@@ -347,15 +347,13 @@ body.woocommerce-checkout .wc_payment_method label {
 }
 
 /* Add card icon before Yuno Card label */
-body.woocommerce-checkout .wc_payment_method.payment_method_thix_yuno_card label::before {
+body.woocommerce-checkout .wc_payment_method.payment_method_yuno_card label::before {
   content: "💳" !important;
   font-size: 18px !important;
   display: inline-block !important;
   line-height: 1 !important;
   filter: brightness(1.1) !important;
 }
-
-/* BACKWARD COMPATIBILITY: Keep old payment_method_thix_yuno_card for existing installs */
 
 /* Show radio button for payment methods (override inline display:none) - move to right */
 body.woocommerce-checkout .wc_payment_method input.input-radio[type="radio"] {

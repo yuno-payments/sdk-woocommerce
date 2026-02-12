@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) exit;
  */
 
 function yuno_get_env($key, $default = '') {
-    $settings = get_option('woocommerce_thix_yuno_card_settings', []);
+    $settings = get_option('woocommerce_yuno_card_settings', []);
     if (is_array($settings)) {
         $map = [
             'ACCOUNT_ID'             => 'account_id',
@@ -258,7 +258,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ], 409);
     }
 
-    $existingSession = (string) $order->get_meta('_thix_yuno_checkout_session');
+    $existingSession = (string) $order->get_meta('_yuno_checkout_session');
     if (!empty($existingSession)) {
         return yuno_json([
             'checkout_session' => $existingSession,
@@ -329,7 +329,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         'full_response'    => $res['raw'], // May contain available payment_methods
     ]);
 
-    $order->update_meta_data('_thix_yuno_checkout_session', $checkoutSession);
+    $order->update_meta_data('_yuno_checkout_session', $checkoutSession);
     $order->save();
 
     return yuno_json([
@@ -364,7 +364,7 @@ function yuno_create_payment(WP_REST_Request $request) {
         return yuno_json(['handled' => true, 'error' => 'Order already paid'], 409);
     }
 
-    $lockKey = 'thix_yuno_pay_lock_' . (int)$order->get_id();
+    $lockKey = 'yuno_pay_lock_' . (int)$order->get_id();
     if (get_transient($lockKey)) {
         return yuno_json(['handled' => true, 'error' => 'Payment creation is already in progress'], 409);
     }
@@ -547,8 +547,8 @@ function yuno_create_payment(WP_REST_Request $request) {
         ? ($res['raw']['id'] ?? $res['raw']['payment_id'] ?? null)
         : null;
 
-    if ($payment_id) $order->update_meta_data('_thix_yuno_payment_id', $payment_id);
-    $order->update_meta_data('_thix_yuno_payment_raw', $res['raw']);
+    if ($payment_id) $order->update_meta_data('_yuno_payment_id', $payment_id);
+    $order->update_meta_data('_yuno_payment_raw', $res['raw']);
     $order->save();
 
     return yuno_json([
@@ -567,7 +567,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
 
     // ✅ SECURITY: Server-side verification implemented
     // Frontend only sends payment_id, backend verifies status with Yuno API
-    $payment_id = $params['payment_id'] ?? $params['paymentId'] ?? $order->get_meta('_thix_yuno_payment_id');
+    $payment_id = $params['payment_id'] ?? $params['paymentId'] ?? $order->get_meta('_yuno_payment_id');
 
     if (!$payment_id) {
         yuno_log('error', 'Confirm: missing payment_id', [
@@ -654,7 +654,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
     // ✅ SECURITY: Validate payment_id belongs to this order
     // Prevent payment reuse attack where attacker uses a legitimate payment_id
     // from one order to mark a different order as paid
-    $stored_payment_id = $order->get_meta('_thix_yuno_payment_id');
+    $stored_payment_id = $order->get_meta('_yuno_payment_id');
 
     if ($stored_payment_id && $stored_payment_id !== $payment_id) {
         yuno_log('error', 'Confirm: payment_id mismatch - possible payment reuse attack', [
@@ -821,7 +821,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
 
     // 3. ✅ CRITICAL: Check if payment_id exists (payment was initiated)
     // If it exists, verify with Yuno API to prevent double-payment race condition
-    $payment_id = $order->get_meta('_thix_yuno_payment_id');
+    $payment_id = $order->get_meta('_yuno_payment_id');
 
     if (!$payment_id) {
         // No payment initiated yet, safe to proceed

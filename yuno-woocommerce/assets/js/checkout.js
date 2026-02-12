@@ -461,7 +461,7 @@ async function startYunoCheckout() {
 
           const paymentRes = await createPayment(payload);
 
-          console.log("[THIX YUNO] /payments split response:", paymentRes?.split || "No split data");
+          console.log("[YUNO] /payments split response:", paymentRes?.split || "No split data");
 
           if (paymentRes?.handled) {
             console.warn("[YUNO] createPayment returned 409 (handled)", paymentRes);
