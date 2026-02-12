@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) exit;
  * =========================
  */
 
-function thix_yuno_get_env($key, $default = '') {
+function yuno_get_env($key, $default = '') {
     $settings = get_option('woocommerce_thix_yuno_card_settings', []);
     if (is_array($settings)) {
         $map = [
@@ -36,7 +36,7 @@ function thix_yuno_get_env($key, $default = '') {
     return $default;
 }
 
-function thix_yuno_api_url_from_public_key($publicKey) {
+function yuno_api_url_from_public_key($publicKey) {
     $prefix = explode('_', (string)$publicKey)[0] ?? '';
     $map = [
         'dev'     => '-dev',
@@ -48,11 +48,11 @@ function thix_yuno_api_url_from_public_key($publicKey) {
     return "https://api{$suffix}.y.uno";
 }
 
-function thix_yuno_json($data, $status = 200) {
+function yuno_json($data, $status = 200) {
     return new WP_REST_Response($data, $status);
 }
 
-function thix_yuno_wp_remote_json($method, $url, $headers = [], $body = null, $timeout = 30) {
+function yuno_wp_remote_json($method, $url, $headers = [], $body = null, $timeout = 30) {
     $args = [
         'method'  => strtoupper($method),
         'headers' => $headers,
@@ -74,7 +74,7 @@ function thix_yuno_wp_remote_json($method, $url, $headers = [], $body = null, $t
     $json    = json_decode($rawBody, true);
 
     // Log Yuno HTTP response for debugging
-    thix_yuno_log('debug', 'Yuno HTTP response', [
+    yuno_log('debug', 'Yuno HTTP response', [
         'method' => $method,
         'url'    => $url,
         'status' => $status,
@@ -92,7 +92,7 @@ function thix_yuno_wp_remote_json($method, $url, $headers = [], $body = null, $t
  * Woo decimals as source of truth (store setting).
  * If merchant sets 0 decimals for COP, this returns 0.
  */
-function thix_yuno_get_wc_price_decimals() {
+function yuno_get_wc_price_decimals() {
     if (function_exists('wc_get_price_decimals')) {
         $d = (int) wc_get_price_decimals();
     } else {
@@ -111,7 +111,7 @@ function thix_yuno_get_wc_price_decimals() {
  * @param array $raw The raw Yuno API response
  * @return string The extracted status in uppercase, or 'UNKNOWN' if not found
  */
-function thix_yuno_extract_payment_status($raw) {
+function yuno_extract_payment_status($raw) {
     // Validate that $raw is an array before accessing elements
     // When Yuno API returns non-JSON (e.g., "Error: timeout"), $raw becomes a string
     // Accessing array keys on a string returns the first character, causing incorrect status
@@ -139,9 +139,9 @@ function thix_yuno_extract_payment_status($raw) {
     return 'UNKNOWN';
 }
 
-function thix_yuno_get_order_from_request(WP_REST_Request $request) {
+function yuno_get_order_from_request(WP_REST_Request $request) {
     if (!class_exists('WooCommerce')) {
-        return [null, thix_yuno_json(['error' => 'WooCommerce not active'], 500)];
+        return [null, yuno_json(['error' => 'WooCommerce not active'], 500)];
     }
 
     $params = (array) $request->get_json_params();
@@ -151,45 +151,45 @@ function thix_yuno_get_order_from_request(WP_REST_Request $request) {
     $order_key = wc_clean(wp_unslash($params['order_key'] ?? $params['orderKey'] ?? ''));
 
     if (!$order_id) {
-        return [null, thix_yuno_json(['error' => 'Missing order_id'], 400)];
+        return [null, yuno_json(['error' => 'Missing order_id'], 400)];
     }
 
     $order = wc_get_order($order_id);
     if (!$order) {
-        return [null, thix_yuno_json(['error' => 'Order not found', 'order_id' => $order_id], 404)];
+        return [null, yuno_json(['error' => 'Order not found', 'order_id' => $order_id], 404)];
     }
 
     if ($order_key && method_exists($order, 'get_order_key')) {
         if ($order->get_order_key() !== $order_key) {
-            return [null, thix_yuno_json(['error' => 'Invalid order_key'], 403)];
+            return [null, yuno_json(['error' => 'Invalid order_key'], 403)];
         }
     }
 
     return [$order, null];
 }
 
-function thix_yuno_build_idempotency_key($order_id, $checkout_session) {
+function yuno_build_idempotency_key($order_id, $checkout_session) {
     $base = ((int)$order_id) . '|' . ((string)$checkout_session) . '|' . get_site_url();
     $hash = wp_hash($base, 'auth');
     return 'wc-' . (int)$order_id . '-yuno-' . substr($hash, 0, 24);
 }
 
-function thix_yuno_debug_enabled() {
-    $dbg = (string) thix_yuno_get_env('DEBUG', 'no');
+function yuno_debug_enabled() {
+    $dbg = (string) yuno_get_env('DEBUG', 'no');
     return in_array($dbg, ['yes','1','true'], true);
 }
 
-function thix_yuno_logger() {
+function yuno_logger() {
     static $logger = null;
     if ($logger === null && function_exists('wc_get_logger')) $logger = wc_get_logger();
     return $logger;
 }
 
-function thix_yuno_log($level, $message, $context = []) {
-    if (!thix_yuno_debug_enabled()) return;
-    $logger = thix_yuno_logger();
+function yuno_log($level, $message, $context = []) {
+    if (!yuno_debug_enabled()) return;
+    $logger = yuno_logger();
     if (!$logger) return;
-    $logger->log($level, $message . ' ' . wp_json_encode($context), ['source' => 'thix-yuno']);
+    $logger->log($level, $message . ' ' . wp_json_encode($context), ['source' => 'yuno']);
 }
 
 /**
@@ -200,59 +200,59 @@ function thix_yuno_log($level, $message, $context = []) {
 
 add_action('rest_api_init', function () {
 
-    register_rest_route('thix-yuno/v1', '/public-api-key', [
+    register_rest_route('yuno/v1', '/public-api-key', [
         'methods'             => 'GET',
         'permission_callback' => '__return_true',
         'callback'            => function () {
-            return thix_yuno_json(['publicApiKey' => thix_yuno_get_env('PUBLIC_API_KEY', '')], 200);
+            return yuno_json(['publicApiKey' => yuno_get_env('PUBLIC_API_KEY', '')], 200);
         },
     ]);
 
-    register_rest_route('thix-yuno/v1', '/checkout-session', [
+    register_rest_route('yuno/v1', '/checkout-session', [
         'methods'             => 'POST',
         'permission_callback' => '__return_true',
-        'callback'            => 'thix_yuno_create_checkout_session',
+        'callback'            => 'yuno_create_checkout_session',
     ]);
 
-    register_rest_route('thix-yuno/v1', '/payments', [
+    register_rest_route('yuno/v1', '/payments', [
         'methods'             => 'POST',
         'permission_callback' => '__return_true',
-        'callback'            => 'thix_yuno_create_payment',
+        'callback'            => 'yuno_create_payment',
     ]);
 
-    register_rest_route('thix-yuno/v1', '/confirm', [
+    register_rest_route('yuno/v1', '/confirm', [
         'methods'             => 'POST',
         'permission_callback' => '__return_true',
-        'callback'            => 'thix_yuno_confirm_order_payment',
+        'callback'            => 'yuno_confirm_order_payment',
     ]);
 
-    register_rest_route('thix-yuno/v1', '/check-order-status', [
+    register_rest_route('yuno/v1', '/check-order-status', [
         'methods'             => 'POST',
         'permission_callback' => '__return_true',
-        'callback'            => 'thix_yuno_check_order_status',
+        'callback'            => 'yuno_check_order_status',
     ]);
 
-    register_rest_route('thix-yuno/v1', '/duplicate-order', [
+    register_rest_route('yuno/v1', '/duplicate-order', [
         'methods'             => 'POST',
         'permission_callback' => '__return_true',
-        'callback'            => 'thix_yuno_duplicate_order',
+        'callback'            => 'yuno_duplicate_order',
     ]);
 });
 
-function thix_yuno_create_checkout_session(WP_REST_Request $request) {
-    $accountId = thix_yuno_get_env('ACCOUNT_ID', '');
-    $publicKey = thix_yuno_get_env('PUBLIC_API_KEY', '');
-    $secretKey = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
+function yuno_create_checkout_session(WP_REST_Request $request) {
+    $accountId = yuno_get_env('ACCOUNT_ID', '');
+    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
     if (!$accountId || !$publicKey || !$secretKey) {
-        return thix_yuno_json(['error' => 'Missing required keys'], 400);
+        return yuno_json(['error' => 'Missing required keys'], 400);
     }
 
-    [$order, $err] = thix_yuno_get_order_from_request($request);
+    [$order, $err] = yuno_get_order_from_request($request);
     if ($err) return $err;
 
     if ($order->is_paid()) {
-        return thix_yuno_json([
+        return yuno_json([
             'error'    => 'Order already paid',
             'redirect' => $order->get_checkout_order_received_url(),
         ], 409);
@@ -260,7 +260,7 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
 
     $existingSession = (string) $order->get_meta('_thix_yuno_checkout_session');
     if (!empty($existingSession)) {
-        return thix_yuno_json([
+        return yuno_json([
             'checkout_session' => $existingSession,
             'country'          => $order->get_billing_country() ?: 'CO',
             'order_id'         => $order->get_id(),
@@ -268,15 +268,15 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
         ], 200);
     }
 
-    $apiUrl = thix_yuno_api_url_from_public_key($publicKey);
+    $apiUrl = yuno_api_url_from_public_key($publicKey);
 
     $country      = $order->get_billing_country() ?: 'CO';
     $currency     = $order->get_currency() ?: 'COP';
     $total_major  = (float) $order->get_total();
-    $decimals     = thix_yuno_get_wc_price_decimals();
+    $decimals     = yuno_get_wc_price_decimals();
     $amount_value = (float) number_format($total_major, $decimals, '.', '');
 
-    thix_yuno_log('info', 'checkout-session amount', [
+    yuno_log('info', 'checkout-session amount', [
         'order_id'      => $order->get_id(),
         'currency'      => $currency,
         'wc_decimals'   => $decimals,
@@ -295,7 +295,7 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
         ],
     ];
 
-    $res = thix_yuno_wp_remote_json(
+    $res = yuno_wp_remote_json(
         'POST',
         "{$apiUrl}/v1/checkout/sessions",
         [
@@ -308,7 +308,7 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
     );
 
     if (!$res['ok']) {
-        return thix_yuno_json([
+        return yuno_json([
             'error'    => 'Yuno create checkout session failed',
             'status'   => $res['status'],
             'response' => $res['raw'],
@@ -320,10 +320,10 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
         : null;
 
     if (!$checkoutSession) {
-        return thix_yuno_json(['error' => 'Yuno response missing checkout_session/id', 'response' => $res['raw']], 400);
+        return yuno_json(['error' => 'Yuno response missing checkout_session/id', 'response' => $res['raw']], 400);
     }
 
-    thix_yuno_log('info', 'Yuno checkout session response', [
+    yuno_log('info', 'Yuno checkout session response', [
         'order_id'         => $order->get_id(),
         'checkout_session' => $checkoutSession,
         'full_response'    => $res['raw'], // May contain available payment_methods
@@ -332,7 +332,7 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
     $order->update_meta_data('_thix_yuno_checkout_session', $checkoutSession);
     $order->save();
 
-    return thix_yuno_json([
+    return yuno_json([
         'checkout_session' => $checkoutSession,
         'country'          => $country,
         'order_id'         => $order->get_id(),
@@ -340,16 +340,16 @@ function thix_yuno_create_checkout_session(WP_REST_Request $request) {
     ], 200);
 }
 
-function thix_yuno_create_payment(WP_REST_Request $request) {
-    $accountId = thix_yuno_get_env('ACCOUNT_ID', '');
-    $publicKey = thix_yuno_get_env('PUBLIC_API_KEY', '');
-    $secretKey = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
+function yuno_create_payment(WP_REST_Request $request) {
+    $accountId = yuno_get_env('ACCOUNT_ID', '');
+    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
     if (!$accountId || !$publicKey || !$secretKey) {
-        return thix_yuno_json(['error' => 'Missing required keys'], 400);
+        return yuno_json(['error' => 'Missing required keys'], 400);
     }
 
-    [$order, $err] = thix_yuno_get_order_from_request($request);
+    [$order, $err] = yuno_get_order_from_request($request);
     if ($err) return $err;
 
     $params          = (array) $request->get_json_params();
@@ -357,40 +357,40 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     $checkoutSession = $params['checkoutSession'] ?? ($params['checkout_session'] ?? null);
 
     if (!$oneTimeToken || !$checkoutSession) {
-        return thix_yuno_json(['error' => 'Missing oneTimeToken or checkoutSession'], 400);
+        return yuno_json(['error' => 'Missing oneTimeToken or checkoutSession'], 400);
     }
 
     if ($order->is_paid()) {
-        return thix_yuno_json(['handled' => true, 'error' => 'Order already paid'], 409);
+        return yuno_json(['handled' => true, 'error' => 'Order already paid'], 409);
     }
 
     $lockKey = 'thix_yuno_pay_lock_' . (int)$order->get_id();
     if (get_transient($lockKey)) {
-        return thix_yuno_json(['handled' => true, 'error' => 'Payment creation is already in progress'], 409);
+        return yuno_json(['handled' => true, 'error' => 'Payment creation is already in progress'], 409);
     }
     set_transient($lockKey, 1, 30);
 
-    $apiUrl   = thix_yuno_api_url_from_public_key($publicKey);
+    $apiUrl   = yuno_api_url_from_public_key($publicKey);
     $country  = $order->get_billing_country() ?: 'CO';
     $currency = $order->get_currency() ?: 'COP';
 
     $total_major  = (float) $order->get_total();
-    $decimals     = thix_yuno_get_wc_price_decimals();
+    $decimals     = yuno_get_wc_price_decimals();
     $amount_value = (float) number_format($total_major, $decimals, '.', '');
 
-    $idempotencyKey = thix_yuno_build_idempotency_key($order->get_id(), $checkoutSession);
+    $idempotencyKey = yuno_build_idempotency_key($order->get_id(), $checkoutSession);
 
     // Split config
-    $split_enabled_setting = (string) thix_yuno_get_env('SPLIT_ENABLED', 'no');
+    $split_enabled_setting = (string) yuno_get_env('SPLIT_ENABLED', 'no');
     $split_enabled         = in_array($split_enabled_setting, ['yes','1','true'], true);
 
-    $recipient_id = trim((string) thix_yuno_get_env('YUNO_RECIPIENT_ID', ''));
+    $recipient_id = trim((string) yuno_get_env('YUNO_RECIPIENT_ID', ''));
 
     // Commission percent (0..100)
-    $pct_raw = trim((string) thix_yuno_get_env('SPLIT_COMMISSION_PERCENT', ''));
+    $pct_raw = trim((string) yuno_get_env('SPLIT_COMMISSION_PERCENT', ''));
 
     // Fixed commission in minor units (e.g. 1500 = 15.00 USD)
-    $fixed_raw   = trim((string) thix_yuno_get_env('SPLIT_FIXED_AMOUNT', ''));
+    $fixed_raw   = trim((string) yuno_get_env('SPLIT_FIXED_AMOUNT', ''));
     $fixed_minor = ($fixed_raw !== '' && ctype_digit($fixed_raw)) ? (int) $fixed_raw : null;
 
     // compute commission in MAJOR units
@@ -403,7 +403,7 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
             $pct = (float) str_replace(',', '.', $pct_raw);
             if ($pct < 0 || $pct > 100) {
                 delete_transient($lockKey);
-                return thix_yuno_json(['error' => 'Split commission percent must be between 0 and 100'], 400);
+                return yuno_json(['error' => 'Split commission percent must be between 0 and 100'], 400);
             }
             $commission_amount = round($amount_value * ($pct / 100.0), $decimals);
             $commission_mode   = 'percent';
@@ -411,7 +411,7 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
         } elseif ($fixed_minor !== null) {
             if ($fixed_minor < 0) {
                 delete_transient($lockKey);
-                return thix_yuno_json(['error' => 'Split fixed amount must be >= 0 (minor units)'], 400);
+                return yuno_json(['error' => 'Split fixed amount must be >= 0 (minor units)'], 400);
             }
             $factor            = pow(10, $decimals);
             $commission_amount = round($fixed_minor / $factor, $decimals);
@@ -425,12 +425,12 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
 
         if ($recipient_id === '') {
             delete_transient($lockKey);
-            return thix_yuno_json(['error' => 'Split is enabled but Yuno Recipient ID is missing'], 400);
+            return yuno_json(['error' => 'Split is enabled but Yuno Recipient ID is missing'], 400);
         }
 
         if ($commission_amount < 0 || $commission_amount > $amount_value) {
             delete_transient($lockKey);
-            return thix_yuno_json([
+            return yuno_json([
                 'error'              => 'Split commission must be between 0 and order total (major units)',
                 'commission_amount'  => $commission_amount,
                 'order_total_amount' => $amount_value,
@@ -441,7 +441,7 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     // Calculate seller_amount for logging and payload construction
     $seller_amount = $split_enabled ? round($amount_value - $commission_amount, $decimals) : null;
 
-    thix_yuno_log('info', 'payments amount (woo -> yuno)', [
+    yuno_log('info', 'payments amount (woo -> yuno)', [
         'order_id'         => $order->get_id(),
         'currency'         => $currency,
         'wc_decimals'      => $decimals,
@@ -505,12 +505,12 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     if (isset($payload_for_log['payment_method']['token'])) {
         $payload_for_log['payment_method']['token'] = '[REDACTED]';
     }
-    thix_yuno_log('debug', 'payments payload (sanitized)', [
+    yuno_log('debug', 'payments payload (sanitized)', [
         'order_id' => $order->get_id(),
         'payload'  => $payload_for_log,
     ]);
 
-    $res = thix_yuno_wp_remote_json(
+    $res = yuno_wp_remote_json(
         'POST',
         "{$apiUrl}/v1/payments",
         [
@@ -530,13 +530,13 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
         $order->add_order_note('Yuno payment error: ' . (is_string($res['raw']) ? $res['raw'] : wp_json_encode($res['raw'])));
         $order->save();
 
-        thix_yuno_log('warning', 'Yuno payment creation failed (order remains pending for retry)', [
+        yuno_log('warning', 'Yuno payment creation failed (order remains pending for retry)', [
             'order_id' => $order->get_id(),
             'status'   => $res['status'],
             'response' => $res['raw'],
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'error'    => 'Yuno create payment failed',
             'status'   => $res['status'],
             'response' => $res['raw'],
@@ -551,7 +551,7 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     $order->update_meta_data('_thix_yuno_payment_raw', $res['raw']);
     $order->save();
 
-    return thix_yuno_json([
+    return yuno_json([
         'ok'             => true,
         'payment_id'     => $payment_id,
         'idempotency_key'=> $idempotencyKey,
@@ -559,8 +559,8 @@ function thix_yuno_create_payment(WP_REST_Request $request) {
     ], 200);
 }
 
-function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
-    [$order, $err] = thix_yuno_get_order_from_request($request);
+function yuno_confirm_order_payment(WP_REST_Request $request) {
+    [$order, $err] = yuno_get_order_from_request($request);
     if ($err) return $err;
 
     $params = (array) $request->get_json_params();
@@ -570,19 +570,19 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     $payment_id = $params['payment_id'] ?? $params['paymentId'] ?? $order->get_meta('_thix_yuno_payment_id');
 
     if (!$payment_id) {
-        thix_yuno_log('error', 'Confirm: missing payment_id', [
+        yuno_log('error', 'Confirm: missing payment_id', [
             'order_id' => $order->get_id(),
         ]);
-        return thix_yuno_json(['error' => 'Missing payment_id'], 400);
+        return yuno_json(['error' => 'Missing payment_id'], 400);
     }
 
     // Check if order is already paid (idempotency)
     if ($order->is_paid()) {
-        thix_yuno_log('info', 'Confirm: order already paid', [
+        yuno_log('info', 'Confirm: order already paid', [
             'order_id'   => $order->get_id(),
             'payment_id' => $payment_id,
         ]);
-        return thix_yuno_json([
+        return yuno_json([
             'ok'        => true,
             'order_id'  => $order->get_id(),
             'new_status'=> $order->get_status(),
@@ -592,25 +592,25 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     }
 
     // Get credentials
-    $publicKey = thix_yuno_get_env('PUBLIC_API_KEY', '');
-    $secretKey = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
+    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
     if (!$publicKey || !$secretKey) {
-        thix_yuno_log('error', 'Confirm: missing API keys', [
+        yuno_log('error', 'Confirm: missing API keys', [
             'order_id' => $order->get_id(),
         ]);
-        return thix_yuno_json(['error' => 'Missing API keys'], 500);
+        return yuno_json(['error' => 'Missing API keys'], 500);
     }
 
-    $apiUrl = thix_yuno_api_url_from_public_key($publicKey);
+    $apiUrl = yuno_api_url_from_public_key($publicKey);
 
     // ✅ SERVER-SIDE VERIFICATION: Query Yuno for payment status
-    thix_yuno_log('info', 'Confirm: verifying payment with Yuno', [
+    yuno_log('info', 'Confirm: verifying payment with Yuno', [
         'order_id'   => $order->get_id(),
         'payment_id' => $payment_id,
     ]);
 
-    $res = thix_yuno_wp_remote_json(
+    $res = yuno_wp_remote_json(
         'GET',
         "{$apiUrl}/v1/payments/{$payment_id}",
         [
@@ -622,7 +622,7 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     );
 
     if (!$res['ok']) {
-        thix_yuno_log('error', 'Confirm: failed to verify payment with Yuno', [
+        yuno_log('error', 'Confirm: failed to verify payment with Yuno', [
             'order_id'   => $order->get_id(),
             'payment_id' => $payment_id,
             'status'     => $res['status'],
@@ -633,7 +633,7 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
         $order->add_order_note('Yuno verification failed (HTTP ' . $res['status'] . '). payment_id=' . $payment_id);
         $order->save();
 
-        return thix_yuno_json([
+        return yuno_json([
             'error'   => 'Could not verify payment status with Yuno',
             'order_id'=> $order->get_id(),
             'retry'   => true,
@@ -642,14 +642,14 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
 
     // ✅ Source of truth: status verified by Yuno API
     // Log FULL response for debugging
-    thix_yuno_log('info', 'Confirm: full Yuno response', [
+    yuno_log('info', 'Confirm: full Yuno response', [
         'order_id'      => $order->get_id(),
         'payment_id'    => $payment_id,
         'full_response' => $res['raw'],
     ]);
 
     // Extract status from Yuno response
-    $verified_status = thix_yuno_extract_payment_status($res['raw']);
+    $verified_status = yuno_extract_payment_status($res['raw']);
 
     // ✅ SECURITY: Validate payment_id belongs to this order
     // Prevent payment reuse attack where attacker uses a legitimate payment_id
@@ -657,7 +657,7 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     $stored_payment_id = $order->get_meta('_thix_yuno_payment_id');
 
     if ($stored_payment_id && $stored_payment_id !== $payment_id) {
-        thix_yuno_log('error', 'Confirm: payment_id mismatch - possible payment reuse attack', [
+        yuno_log('error', 'Confirm: payment_id mismatch - possible payment reuse attack', [
             'order_id'           => $order->get_id(),
             'received_payment_id'=> $payment_id,
             'stored_payment_id'  => $stored_payment_id,
@@ -667,13 +667,13 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
         $order->add_order_note('SECURITY: Payment verification failed - payment_id mismatch. Expected: ' . $stored_payment_id . ', Got: ' . $payment_id);
         $order->save();
 
-        return thix_yuno_json([
+        return yuno_json([
             'error'   => 'Payment does not belong to this order',
             'order_id'=> $order->get_id(),
         ], 403);
     }
 
-    thix_yuno_log('info', 'Confirm: payment status verified', [
+    yuno_log('info', 'Confirm: payment status verified', [
         'order_id'           => $order->get_id(),
         'payment_id'         => $payment_id,
         'verified_status'    => $verified_status,
@@ -690,13 +690,13 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
         $order->add_order_note('Yuno payment approved (verified). status=' . $verified_status . ' payment_id=' . $payment_id);
         $order->save();
 
-        thix_yuno_log('info', 'Confirm: order marked as paid', [
+        yuno_log('info', 'Confirm: order marked as paid', [
             'order_id'     => $order->get_id(),
             'payment_id'   => $payment_id,
             'order_status' => $order->get_status(),
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'ok'        => true,
             'order_id'  => $order->get_id(),
             'new_status'=> $order->get_status(),
@@ -709,13 +709,13 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
         $order->add_order_note('Yuno payment rejected. status=' . $verified_status . ' payment_id=' . $payment_id);
         $order->save();
 
-        thix_yuno_log('warning', 'Confirm: order marked as failed', [
+        yuno_log('warning', 'Confirm: order marked as failed', [
             'order_id'   => $order->get_id(),
             'payment_id' => $payment_id,
             'status'     => $verified_status,
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'ok'        => false,
             'failed'    => true,
             'blocked'   => true,
@@ -729,13 +729,13 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
     $order->add_order_note('Yuno payment status: ' . $verified_status . ' (payment_id=' . $payment_id . ')');
     $order->save();
 
-    thix_yuno_log('info', 'Confirm: payment in intermediate state', [
+    yuno_log('info', 'Confirm: payment in intermediate state', [
         'order_id'   => $order->get_id(),
         'payment_id' => $payment_id,
         'status'     => $verified_status,
     ]);
 
-    return thix_yuno_json([
+    return yuno_json([
         'ok'      => true,
         'order_id'=> $order->get_id(),
         'status'  => $verified_status,
@@ -751,34 +751,34 @@ function thix_yuno_confirm_order_payment(WP_REST_Request $request) {
  * ✅ SECURITY: This endpoint verifies with Yuno API if payment was already processed
  * to prevent the race condition where user reloads before auto-confirm completes.
  */
-function thix_yuno_check_order_status(WP_REST_Request $request) {
+function yuno_check_order_status(WP_REST_Request $request) {
     $params = $request->get_json_params();
     $order_id  = absint($params['order_id'] ?? 0);
     $order_key = sanitize_text_field($params['order_key'] ?? '');
 
     if (!$order_id) {
-        return thix_yuno_json(['error' => 'Missing order_id'], 400);
+        return yuno_json(['error' => 'Missing order_id'], 400);
     }
 
     $order = wc_get_order($order_id);
     if (!$order) {
-        return thix_yuno_json(['error' => 'Order not found'], 404);
+        return yuno_json(['error' => 'Order not found'], 404);
     }
 
     // Validate order key if provided
     if ($order_key && $order->get_order_key() !== $order_key) {
-        thix_yuno_log('warning', 'Check order status: order_key mismatch', [
+        yuno_log('warning', 'Check order status: order_key mismatch', [
             'order_id'      => $order_id,
             'provided_key'  => $order_key,
             'expected_key'  => $order->get_order_key(),
         ]);
-        return thix_yuno_json(['error' => 'Invalid order_key'], 403);
+        return yuno_json(['error' => 'Invalid order_key'], 403);
     }
 
     $status = $order->get_status();
     $is_paid = $order->is_paid();
 
-    thix_yuno_log('info', 'Check order status: initial check', [
+    yuno_log('info', 'Check order status: initial check', [
         'order_id' => $order_id,
         'status'   => $status,
         'is_paid'  => $is_paid,
@@ -789,12 +789,12 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
     if ($is_paid || in_array($status, $paid_statuses, true)) {
         $redirect = $order->get_checkout_order_received_url();
 
-        thix_yuno_log('info', 'Check order status: already paid in WooCommerce', [
+        yuno_log('info', 'Check order status: already paid in WooCommerce', [
             'order_id' => $order_id,
             'status'   => $status,
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'is_paid'  => true,
             'status'   => $status,
             'redirect' => $redirect,
@@ -805,12 +805,12 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
     // 2. ✅ AUTO-DUPLICATE: If order is in failed state, signal frontend to duplicate
     // This handles the F5 reload case where user refreshes a failed order
     if ($status === 'failed') {
-        thix_yuno_log('info', 'Check order status: order is failed, should duplicate', [
+        yuno_log('info', 'Check order status: order is failed, should duplicate', [
             'order_id' => $order_id,
             'status'   => $status,
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'is_paid'         => false,
             'is_failed'       => true,
             'should_duplicate'=> true,
@@ -825,11 +825,11 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
 
     if (!$payment_id) {
         // No payment initiated yet, safe to proceed
-        thix_yuno_log('info', 'Check order status: no payment_id found, allowing payment', [
+        yuno_log('info', 'Check order status: no payment_id found, allowing payment', [
             'order_id' => $order_id,
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'is_paid' => false,
             'status'  => $status,
             'message' => 'Order ready for payment',
@@ -837,21 +837,21 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
     }
 
     // 4. Payment was initiated, verify with Yuno API
-    thix_yuno_log('info', 'Check order status: payment_id found, verifying with Yuno', [
+    yuno_log('info', 'Check order status: payment_id found, verifying with Yuno', [
         'order_id'   => $order_id,
         'payment_id' => $payment_id,
     ]);
 
-    $publicKey = thix_yuno_get_env('PUBLIC_API_KEY', '');
-    $secretKey = thix_yuno_get_env('PRIVATE_SECRET_KEY', '');
+    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
     if (!$publicKey || !$secretKey) {
         // Can't verify, but safer to block than allow double payment
-        thix_yuno_log('warning', 'Check order status: missing API keys, blocking payment', [
+        yuno_log('warning', 'Check order status: missing API keys, blocking payment', [
             'order_id' => $order_id,
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'is_paid' => false,
             'status'  => $status,
             'message' => 'Order ready for payment',
@@ -859,9 +859,9 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    $apiUrl = thix_yuno_api_url_from_public_key($publicKey);
+    $apiUrl = yuno_api_url_from_public_key($publicKey);
 
-    $res = thix_yuno_wp_remote_json(
+    $res = yuno_wp_remote_json(
         'GET',
         "{$apiUrl}/v1/payments/{$payment_id}",
         [
@@ -874,13 +874,13 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
 
     if (!$res['ok']) {
         // API call failed, allow payment (but log the issue)
-        thix_yuno_log('warning', 'Check order status: Yuno API verification failed', [
+        yuno_log('warning', 'Check order status: Yuno API verification failed', [
             'order_id'   => $order_id,
             'payment_id' => $payment_id,
             'status'     => $res['status'],
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'is_paid'        => false,
             'status'         => $status,
             'has_payment_id' => !empty($payment_id),
@@ -889,9 +889,9 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
     }
 
     // Extract status from Yuno response
-    $verified_status = thix_yuno_extract_payment_status($res['raw']);
+    $verified_status = yuno_extract_payment_status($res['raw']);
 
-    thix_yuno_log('info', 'Check order status: Yuno verification result', [
+    yuno_log('info', 'Check order status: Yuno verification result', [
         'order_id'        => $order_id,
         'payment_id'      => $payment_id,
         'verified_status' => $verified_status,
@@ -899,7 +899,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
 
     // 5. If payment is SUCCEEDED in Yuno, mark order as paid NOW
     if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
-        thix_yuno_log('info', 'Check order status: Payment succeeded in Yuno, marking order as paid', [
+        yuno_log('info', 'Check order status: Payment succeeded in Yuno, marking order as paid', [
             'order_id'   => $order_id,
             'payment_id' => $payment_id,
             'status'     => $verified_status,
@@ -912,7 +912,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
 
         $redirect = $order->get_checkout_order_received_url();
 
-        return thix_yuno_json([
+        return yuno_json([
             'is_paid'         => true,
             'status'          => $order->get_status(),
             'redirect'        => $redirect,
@@ -924,7 +924,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
 
     // 6. If payment is REJECTED/FAILED, mark order as failed and signal duplication
     if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
-        thix_yuno_log('warning', 'Check order status: Payment failed in Yuno, marking as failed', [
+        yuno_log('warning', 'Check order status: Payment failed in Yuno, marking as failed', [
             'order_id'   => $order_id,
             'payment_id' => $payment_id,
             'status'     => $verified_status,
@@ -937,7 +937,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
             $order->save();
         }
 
-        return thix_yuno_json([
+        return yuno_json([
             'is_paid'         => false,
             'is_failed'       => true,
             'should_duplicate'=> true,
@@ -948,7 +948,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
     }
 
     // 7. Payment is PENDING/PROCESSING/UNKNOWN - safer to block new payment
-    thix_yuno_log('info', 'Check order status: Payment in intermediate state, allowing retry', [
+    yuno_log('info', 'Check order status: Payment in intermediate state, allowing retry', [
         'order_id'   => $order_id,
         'payment_id' => $payment_id,
         'status'     => $verified_status,
@@ -956,7 +956,7 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
 
     // For intermediate states, we allow payment (user might be retrying)
     // but we could also choose to block and show "payment processing" message
-    return thix_yuno_json([
+    return yuno_json([
         'is_paid'        => false,
         'status'         => $status,
         'has_payment_id' => !empty($payment_id),
@@ -970,11 +970,11 @@ function thix_yuno_check_order_status(WP_REST_Request $request) {
  * Duplicate a failed order with the same products and customer data
  * Used when a payment fails and we want to allow retry with a new order
  */
-function thix_yuno_duplicate_order(WP_REST_Request $request) {
-    [$order, $err] = thix_yuno_get_order_from_request($request);
+function yuno_duplicate_order(WP_REST_Request $request) {
+    [$order, $err] = yuno_get_order_from_request($request);
     if ($err) return $err;
 
-    thix_yuno_log('info', 'Duplicate order: starting', [
+    yuno_log('info', 'Duplicate order: starting', [
         'original_order_id' => $order->get_id(),
         'original_status'   => $order->get_status(),
     ]);
@@ -985,13 +985,13 @@ function thix_yuno_duplicate_order(WP_REST_Request $request) {
 
         // Check if order creation failed (wc_create_order can return WP_Error)
         if (is_wp_error($new_order)) {
-            thix_yuno_log('error', 'Duplicate order: wc_create_order failed', [
+            yuno_log('error', 'Duplicate order: wc_create_order failed', [
                 'original_order_id' => $order->get_id(),
                 'error_code'        => $new_order->get_error_code(),
                 'error_message'     => $new_order->get_error_message(),
             ]);
 
-            return thix_yuno_json([
+            return yuno_json([
                 'error'   => 'Failed to create new order',
                 'message' => $new_order->get_error_message(),
             ], 500);
@@ -1083,12 +1083,12 @@ function thix_yuno_duplicate_order(WP_REST_Request $request) {
         $new_order->add_order_note('Created from failed order #' . $order->get_id() . ' for payment retry.');
         $new_order->save();
 
-        thix_yuno_log('info', 'Duplicate order: success', [
+        yuno_log('info', 'Duplicate order: success', [
             'original_order_id' => $order->get_id(),
             'new_order_id'      => $new_order->get_id(),
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'ok'            => true,
             'new_order_id'  => $new_order->get_id(),
             'new_order_key' => $new_order->get_order_key(),
@@ -1098,12 +1098,12 @@ function thix_yuno_duplicate_order(WP_REST_Request $request) {
         ], 200);
 
     } catch (Exception $e) {
-        thix_yuno_log('error', 'Duplicate order: failed', [
+        yuno_log('error', 'Duplicate order: failed', [
             'original_order_id' => $order->get_id(),
             'error'             => $e->getMessage(),
         ]);
 
-        return thix_yuno_json([
+        return yuno_json([
             'error'   => 'Failed to create new order',
             'message' => $e->getMessage(),
         ], 500);

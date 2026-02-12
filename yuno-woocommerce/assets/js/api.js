@@ -1,16 +1,16 @@
 // Access dynamically to avoid capturing undefined values before wp_localize_script runs
 function getRestBase() {
-  return window.THIX_YUNO_WC?.restBase;
+  return window.YUNO_WC?.restBase;
 }
 
 function getNonce() {
-  return window.THIX_YUNO_WC?.nonce;
+  return window.YUNO_WC?.nonce;
 }
 
 function assertBase() {
   const REST_BASE = getRestBase();
   if (!REST_BASE) {
-    throw new Error("REST_BASE not defined. Check wp_localize_script(THIX_YUNO_WC).");
+    throw new Error("REST_BASE not defined. Check wp_localize_script(YUNO_WC).");
   }
   return REST_BASE;
 }
@@ -174,7 +174,7 @@ async function duplicateOrder({ orderId, orderKey }) {
 }
 
 // Expose functions globally for checkout.js
-window.THIX_YUNO_API = {
+window.YUNO_API = {
   getPublicApiKey,
   getCheckoutSession,
   createPayment,

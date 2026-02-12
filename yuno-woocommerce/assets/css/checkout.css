@@ -9,7 +9,7 @@
  */
 
 /* ===== CONTAINER ===== */
-.thix-yuno-receipt {
+.yuno-receipt {
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
@@ -20,14 +20,14 @@
 }
 
 @media (min-width: 768px) {
-  .thix-yuno-receipt {
+  .yuno-receipt {
     max-width: 800px;
     padding: 32px 24px;
   }
 }
 
 /* ===== PAGE TITLE ===== */
-.thix-yuno-page-title {
+.yuno-page-title {
   font-size: 24px !important;
   font-weight: 600 !important;
   color: #1a1a1a !important;
@@ -38,14 +38,14 @@
 }
 
 @media (min-width: 768px) {
-  .thix-yuno-page-title {
+  .yuno-page-title {
     font-size: 28px !important;
     margin: 0 0 32px 0 !important;
   }
 }
 
 /* ===== ORDER SUMMARY CONTAINER ===== */
-.thix-yuno-order-summary {
+.yuno-order-summary {
   display: grid;
   gap: 20px;
   padding: 20px;
@@ -58,7 +58,7 @@
 
 /* Mobile: 1 column */
 @media (max-width: 575px) {
-  .thix-yuno-order-summary {
+  .yuno-order-summary {
     grid-template-columns: 1fr;
     gap: 16px;
     padding: 16px;
@@ -67,7 +67,7 @@
 
 /* Tablet: 2 columns */
 @media (min-width: 576px) and (max-width: 767px) {
-  .thix-yuno-order-summary {
+  .yuno-order-summary {
     grid-template-columns: repeat(2, 1fr);
     gap: 20px;
   }
@@ -75,30 +75,30 @@
 
 /* Desktop: 4 columns with separators */
 @media (min-width: 768px) {
-  .thix-yuno-order-summary {
+  .yuno-order-summary {
     grid-template-columns: repeat(4, 1fr);
     gap: 0;
     padding: 24px 0;
   }
 
   /* Vertical separators between items (desktop only) */
-  .thix-yuno-order-item:not(:last-child) {
+  .yuno-order-item:not(:last-child) {
     border-right: 1px solid #dee2e6;
     padding-right: 20px;
     margin-right: 20px;
   }
 
-  .thix-yuno-order-item:first-child {
+  .yuno-order-item:first-child {
     padding-left: 20px;
   }
 
-  .thix-yuno-order-item:last-child {
+  .yuno-order-item:last-child {
     padding-right: 20px;
   }
 }
 
 /* ===== ORDER ITEM (Label + Value) ===== */
-.thix-yuno-order-item {
+.yuno-order-item {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -106,7 +106,7 @@
 }
 
 /* Label (uppercase, small, gray) */
-.thix-yuno-order-label {
+.yuno-order-label {
   font-size: 11px !important;
   font-weight: 600 !important;
   text-transform: uppercase !important;
@@ -118,7 +118,7 @@
 }
 
 /* Value (larger, bold, dark) */
-.thix-yuno-order-value {
+.yuno-order-value {
   font-size: 16px !important;
   font-weight: 600 !important;
   color: #1a1a1a !important;
@@ -129,25 +129,25 @@
 }
 
 @media (min-width: 768px) {
-  .thix-yuno-order-value {
+  .yuno-order-value {
     font-size: 18px !important;
   }
 }
 
 /* Total: emphasize with color */
-.thix-yuno-order-total {
+.yuno-order-total {
   color: #000000 !important;
   font-size: 18px !important;
 }
 
 @media (min-width: 768px) {
-  .thix-yuno-order-total {
+  .yuno-order-total {
     font-size: 20px !important;
   }
 }
 
 /* ===== LOADER ===== */
-.thix-yuno-loader {
+.yuno-loader {
   font-size: 14px !important;
   color: #6c757d !important;
   text-align: center !important;
@@ -158,7 +158,7 @@
 }
 
 /* ===== PAY BUTTON ===== */
-.thix-yuno-pay-button {
+.yuno-pay-button {
   width: 100% !important;
   margin: 24px 0 0 0 !important;
   padding: 16px 24px !important;
@@ -174,11 +174,11 @@
   box-sizing: border-box !important;
 }
 
-.thix-yuno-pay-button:hover:not(:disabled) {
+.yuno-pay-button:hover:not(:disabled) {
   background-color: #333333 !important;
 }
 
-.thix-yuno-pay-button:disabled {
+.yuno-pay-button:disabled {
   opacity: 0.5 !important;
   cursor: not-allowed !important;
   background-color: #666666 !important;
@@ -186,21 +186,21 @@
 
 /* ===== SDK ISOLATION ===== */
 /* Remove ALL theme-added styles from SDK inputs */
-.thix-yuno-receipt #thix-yuno-root input,
-.thix-yuno-receipt #thix-yuno-root input:focus,
-.thix-yuno-receipt #thix-yuno-root input:focus-visible,
-.thix-yuno-receipt #thix-yuno-root input:active,
-.thix-yuno-receipt #thix-yuno-root input:hover,
-.thix-yuno-receipt #thix-yuno-apm-form input,
-.thix-yuno-receipt #thix-yuno-apm-form input:focus,
-.thix-yuno-receipt #thix-yuno-apm-form input:focus-visible,
-.thix-yuno-receipt #thix-yuno-apm-form input:active,
-.thix-yuno-receipt #thix-yuno-apm-form input:hover,
-.thix-yuno-receipt #thix-yuno-action-form input,
-.thix-yuno-receipt #thix-yuno-action-form input:focus,
-.thix-yuno-receipt #thix-yuno-action-form input:focus-visible,
-.thix-yuno-receipt #thix-yuno-action-form input:active,
-.thix-yuno-receipt #thix-yuno-action-form input:hover {
+.yuno-receipt #yuno-root input,
+.yuno-receipt #yuno-root input:focus,
+.yuno-receipt #yuno-root input:focus-visible,
+.yuno-receipt #yuno-root input:active,
+.yuno-receipt #yuno-root input:hover,
+.yuno-receipt #yuno-apm-form input,
+.yuno-receipt #yuno-apm-form input:focus,
+.yuno-receipt #yuno-apm-form input:focus-visible,
+.yuno-receipt #yuno-apm-form input:active,
+.yuno-receipt #yuno-apm-form input:hover,
+.yuno-receipt #yuno-action-form input,
+.yuno-receipt #yuno-action-form input:focus,
+.yuno-receipt #yuno-action-form input:focus-visible,
+.yuno-receipt #yuno-action-form input:active,
+.yuno-receipt #yuno-action-form input:hover {
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
@@ -216,18 +216,18 @@
 
 /* CRITICAL: Remove browser autofill/autocomplete background colors */
 /* Chrome, Safari, Edge - autofill background override */
-.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill,
-.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill:hover,
-.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill:focus,
-.thix-yuno-receipt #thix-yuno-root input:-webkit-autofill:active,
-.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill,
-.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill:hover,
-.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill:focus,
-.thix-yuno-receipt #thix-yuno-apm-form input:-webkit-autofill:active,
-.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill,
-.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill:hover,
-.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill:focus,
-.thix-yuno-receipt #thix-yuno-action-form input:-webkit-autofill:active {
+.yuno-receipt #yuno-root input:-webkit-autofill,
+.yuno-receipt #yuno-root input:-webkit-autofill:hover,
+.yuno-receipt #yuno-root input:-webkit-autofill:focus,
+.yuno-receipt #yuno-root input:-webkit-autofill:active,
+.yuno-receipt #yuno-apm-form input:-webkit-autofill,
+.yuno-receipt #yuno-apm-form input:-webkit-autofill:hover,
+.yuno-receipt #yuno-apm-form input:-webkit-autofill:focus,
+.yuno-receipt #yuno-apm-form input:-webkit-autofill:active,
+.yuno-receipt #yuno-action-form input:-webkit-autofill,
+.yuno-receipt #yuno-action-form input:-webkit-autofill:hover,
+.yuno-receipt #yuno-action-form input:-webkit-autofill:focus,
+.yuno-receipt #yuno-action-form input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0 1000px transparent inset !important;
   box-shadow: 0 0 0 1000px transparent inset !important;
   background-color: transparent !important;
@@ -239,37 +239,37 @@
 }
 
 /* Firefox - autofill background override */
-.thix-yuno-receipt #thix-yuno-root input:-moz-autofill,
-.thix-yuno-receipt #thix-yuno-root input:-moz-autofill-preview,
-.thix-yuno-receipt #thix-yuno-apm-form input:-moz-autofill,
-.thix-yuno-receipt #thix-yuno-apm-form input:-moz-autofill-preview,
-.thix-yuno-receipt #thix-yuno-action-form input:-moz-autofill,
-.thix-yuno-receipt #thix-yuno-action-form input:-moz-autofill-preview {
+.yuno-receipt #yuno-root input:-moz-autofill,
+.yuno-receipt #yuno-root input:-moz-autofill-preview,
+.yuno-receipt #yuno-apm-form input:-moz-autofill,
+.yuno-receipt #yuno-apm-form input:-moz-autofill-preview,
+.yuno-receipt #yuno-action-form input:-moz-autofill,
+.yuno-receipt #yuno-action-form input:-moz-autofill-preview {
   background-color: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
 }
 
 /* Remove theme focus rings from SDK elements */
-.thix-yuno-receipt #thix-yuno-root *:focus,
-.thix-yuno-receipt #thix-yuno-root *:focus-visible,
-.thix-yuno-receipt #thix-yuno-apm-form *:focus,
-.thix-yuno-receipt #thix-yuno-apm-form *:focus-visible,
-.thix-yuno-receipt #thix-yuno-action-form *:focus,
-.thix-yuno-receipt #thix-yuno-action-form *:focus-visible {
+.yuno-receipt #yuno-root *:focus,
+.yuno-receipt #yuno-root *:focus-visible,
+.yuno-receipt #yuno-apm-form *:focus,
+.yuno-receipt #yuno-apm-form *:focus-visible,
+.yuno-receipt #yuno-action-form *:focus,
+.yuno-receipt #yuno-action-form *:focus-visible {
   outline: none !important;
   box-shadow: none !important;
 }
 
 /* Ensure consistent box-sizing */
-.thix-yuno-receipt #thix-yuno-root *,
-.thix-yuno-receipt #thix-yuno-apm-form *,
-.thix-yuno-receipt #thix-yuno-action-form * {
+.yuno-receipt #yuno-root *,
+.yuno-receipt #yuno-apm-form *,
+.yuno-receipt #yuno-action-form * {
   box-sizing: border-box !important;
 }
 
 /* Ensure SDK iframes are not affected by theme styles */
-.thix-yuno-receipt iframe {
+.yuno-receipt iframe {
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
@@ -277,7 +277,7 @@
 
 /* ===== HIDE WOOCOMMERCE NATIVE ORDER OVERVIEW ===== */
 /* Hide WooCommerce's default order summary to avoid duplication */
-/* CRITICAL: Only hides when our custom summary (.thix-yuno-receipt) is present */
+/* CRITICAL: Only hides when our custom summary (.yuno-receipt) is present */
 /* This prevents breaking other WooCommerce pages (my-account, order-received, etc.) */
 
 /* Main order overview block (Order, Date, Total, Payment Method) */
@@ -301,7 +301,7 @@ body.woocommerce-order-pay .woocommerce-order h2:first-of-type {
 }
 
 /* Ensure our custom summary is always visible */
-.thix-yuno-order-summary {
+.yuno-order-summary {
   display: grid !important;
 }
 
@@ -354,6 +354,8 @@ body.woocommerce-checkout .wc_payment_method.payment_method_thix_yuno_card label
   line-height: 1 !important;
   filter: brightness(1.1) !important;
 }
+
+/* BACKWARD COMPATIBILITY: Keep old payment_method_thix_yuno_card for existing installs */
 
 /* Show radio button for payment methods (override inline display:none) - move to right */
 body.woocommerce-checkout .wc_payment_method input.input-radio[type="radio"] {

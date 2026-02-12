@@ -2,15 +2,15 @@
   'use strict';
 
   // Prevent double initialization
-  if (window.THIX_YUNO_CHECKOUT_LOADED) {
+  if (window.YUNO_CHECKOUT_LOADED) {
     console.warn("[YUNO] checkout.js already loaded, skipping re-initialization");
     return;
   }
-  window.THIX_YUNO_CHECKOUT_LOADED = true;
+  window.YUNO_CHECKOUT_LOADED = true;
 
   // Guard: Check if API functions are available
-  if (!window.THIX_YUNO_API) {
-    console.error("[YUNO] THIX_YUNO_API not found. api.js not loaded.");
+  if (!window.YUNO_API) {
+    console.error("[YUNO] YUNO_API not found. api.js not loaded.");
     return;
   }
 
@@ -22,11 +22,11 @@
     confirmOrder,
     checkOrderStatus,
     duplicateOrder,
-  } = window.THIX_YUNO_API;
+  } = window.YUNO_API;
 
   let yunoInstance = null;
 
-const ctx = window.THIX_YUNO_WC || {};
+const ctx = window.YUNO_WC || {};
 
 const state = {
   starting: false,
@@ -56,19 +56,19 @@ const state = {
 };
 
 function setLoaderVisible(visible) {
-  const loader = document.getElementById("thix-yuno-loader");
+  const loader = document.getElementById("yuno-loader");
   if (!loader) return;
   loader.style.display = visible ? "block" : "none";
 }
 
 function setPayButtonVisible(visible) {
-  const btn = document.getElementById("thix-yuno-button-pay");
+  const btn = document.getElementById("yuno-button-pay");
   if (!btn) return;
   btn.style.display = visible ? "block" : "none";  // block for full width
 }
 
 function setPayButtonDisabled(disabled) {
-  const btn = document.getElementById("thix-yuno-button-pay");
+  const btn = document.getElementById("yuno-button-pay");
   if (!btn) return;
   btn.disabled = !!disabled;
   btn.style.opacity = disabled ? "0.5" : "1";
@@ -78,7 +78,7 @@ function setPayButtonDisabled(disabled) {
 
 // Add hover effects to Pay button
 function initPayButtonHoverEffects() {
-  const btn = document.getElementById("thix-yuno-button-pay");
+  const btn = document.getElementById("yuno-button-pay");
   if (!btn) return;
 
   btn.addEventListener("mouseenter", () => {
@@ -101,7 +101,7 @@ function resolvePayButtonTarget(e) {
   const t = e.target;
 
   // Your custom button (order-pay receipt)
-  const custom = t.closest?.("#thix-yuno-button-pay");
+  const custom = t.closest?.("#yuno-button-pay");
   if (custom) return custom;
 
   // Woo "Pay for order" button (varies by template)
@@ -165,8 +165,8 @@ async function reinitializeWithNewOrder(newOrderId, newOrderKey, formattedTotal,
   state.lastPaymentId = null;
 
   // Update visible order information in the UI
-  const orderNumberEl = document.getElementById("thix-yuno-order-number");
-  const orderTotalEl = document.getElementById("thix-yuno-order-total");
+  const orderNumberEl = document.getElementById("yuno-order-number");
+  const orderTotalEl = document.getElementById("yuno-order-total");
 
   if (orderNumberEl) {
     orderNumberEl.textContent = newOrderId;
@@ -314,7 +314,7 @@ async function startYunoCheckout() {
 
     await yunoInstance.startCheckout({
       checkoutSession: state.checkoutSession,
-      elementSelector: "#thix-yuno-root",
+      elementSelector: "#yuno-root",
       countryCode: state.countryCode,
       language: ctx.language || "es", // Use WordPress language, fallback to Spanish
       showLoading: true,
@@ -327,8 +327,8 @@ async function startYunoCheckout() {
       renderMode: {
         type: RENDER_MODE_TYPE,
         elementSelector: {
-          apmForm: "#thix-yuno-apm-form",
-          actionForm: "#thix-yuno-action-form",
+          apmForm: "#yuno-apm-form",
+          actionForm: "#yuno-action-form",
         },
       },
 
@@ -699,7 +699,7 @@ function handleKeyPress(e) {
   if (e.key === "Enter" || e.keyCode === 13) {
     console.log("[YUNO]  Enter key pressed, checking if should allow...");
 
-    const btn = document.getElementById("thix-yuno-button-pay");
+    const btn = document.getElementById("yuno-button-pay");
 
     // Only allow Enter if button is enabled
     if (!btn || btn.disabled || state.paying) {
@@ -715,8 +715,8 @@ function handleKeyPress(e) {
 }
 
 // Bind once
-if (!window.__THIX_YUNO_BINDINGS__) {
-  window.__THIX_YUNO_BINDINGS__ = true;
+if (!window.__YUNO_BINDINGS__) {
+  window.__YUNO_BINDINGS__ = true;
   document.addEventListener("click", handlePayClick);
 
   //  Prevent Enter key from submitting with invalid fields
