@@ -20,6 +20,11 @@ function yuno_get_env($key, $default = '') {
             'YUNO_RECIPIENT_ID'      => 'yuno_recipient_id',
             'SPLIT_FIXED_AMOUNT'     => 'split_fixed_amount',
             'SPLIT_COMMISSION_PERCENT' => 'split_commission_percent',
+
+            // Webhook security settings
+            'WEBHOOK_HMAC_SECRET'    => 'webhook_hmac_secret',
+            'WEBHOOK_API_KEY'        => 'webhook_api_key',
+            'WEBHOOK_X_SECRET'       => 'webhook_x_secret',
         ];
 
         if (isset($map[$key])) {
@@ -236,6 +241,12 @@ add_action('rest_api_init', function () {
         'methods'             => 'POST',
         'permission_callback' => '__return_true',
         'callback'            => 'yuno_duplicate_order',
+    ]);
+
+    register_rest_route('yuno/v1', '/webhook', [
+        'methods'             => 'POST',
+        'permission_callback' => 'yuno_verify_webhook_signature',
+        'callback'            => 'yuno_handle_webhook',
     ]);
 });
 
@@ -741,6 +752,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         'status'  => $verified_status,
         'pending' => true,
         'message' => 'Payment is being processed',
+        'redirect'=> $order->get_checkout_order_received_url(),
     ], 200);
 }
 
@@ -1108,4 +1120,455 @@ function yuno_duplicate_order(WP_REST_Request $request) {
             'message' => $e->getMessage(),
         ], 500);
     }
+}
+
+/**
+ * =========================
+ * Webhook Handling
+ * =========================
+ */
+
+/**
+ * Verify Yuno webhook HMAC signature
+ * This is called as permission_callback, so it must return true/false
+ *
+ * @param WP_REST_Request $request
+ * @return bool True if signature is valid, false otherwise
+ */
+function yuno_verify_webhook_signature(WP_REST_Request $request) {
+    // 1) Validate x-api-key / x-secret headers (from Yuno Dashboard)
+    $expectedApiKey = (string) yuno_get_env('WEBHOOK_API_KEY', '');
+    $expectedXSecret = (string) yuno_get_env('WEBHOOK_X_SECRET', '');
+
+    $receivedApiKey = (string) $request->get_header('x-api-key');
+    $receivedXSecret = (string) $request->get_header('x-secret');
+
+    if ($expectedApiKey === '' || $expectedXSecret === '') {
+        yuno_log('error', 'Webhook: WEBHOOK_API_KEY/WEBHOOK_X_SECRET not configured', []);
+        return false;
+    }
+
+    if (!hash_equals($expectedApiKey, $receivedApiKey)) {
+        yuno_log('warning', 'Webhook: x-api-key mismatch', [
+            'received' => $receivedApiKey !== '' ? substr($receivedApiKey, 0, 8) . '...' : '(empty)',
+        ]);
+        return false;
+    }
+
+    if (!hash_equals($expectedXSecret, $receivedXSecret)) {
+        yuno_log('warning', 'Webhook: x-secret mismatch', [
+            'received' => $receivedXSecret !== '' ? substr($receivedXSecret, 0, 8) . '...' : '(empty)',
+        ]);
+        return false;
+    }
+
+    // 2) Validate HMAC signature (Client Secret Key from Yuno Dashboard)
+    $receivedSig = trim((string) $request->get_header('x-hmac-signature'));
+
+    if ($receivedSig === '') {
+        yuno_log('warning', 'Webhook: missing x-hmac-signature header', []);
+        return false;
+    }
+
+    // ✅ CRITICAL FIX: Use WEBHOOK_HMAC_SECRET (not PRIVATE_SECRET_KEY)
+    $hmacSecret = (string) yuno_get_env('WEBHOOK_HMAC_SECRET', '');
+
+    if ($hmacSecret === '') {
+        yuno_log('error', 'Webhook: WEBHOOK_HMAC_SECRET not configured', []);
+        return false;
+    }
+
+    $body = (string) $request->get_body();
+
+    if ($body === '') {
+        yuno_log('warning', 'Webhook: empty body', []);
+        return false;
+    }
+
+    // Remove "sha256=" prefix if present
+    $receivedSig = preg_replace('/^sha256=/i', '', $receivedSig);
+
+    // Compute HMAC in both hex and base64 formats (Yuno might send either)
+    $computedHex = hash_hmac('sha256', $body, $hmacSecret);
+    $computedB64 = base64_encode(hash_hmac('sha256', $body, $hmacSecret, true));
+
+    $isValid = hash_equals($computedHex, $receivedSig) || hash_equals($computedB64, $receivedSig);
+
+    if (!$isValid) {
+        yuno_log('warning', 'Webhook: HMAC signature mismatch', [
+            'received_prefix' => substr($receivedSig, 0, 16) . '...',
+            'computed_hex'    => substr($computedHex, 0, 16) . '...',
+            'computed_b64'    => substr($computedB64, 0, 16) . '...',
+            'body_length'     => strlen($body),
+        ]);
+        return false;
+    }
+
+    yuno_log('info', 'Webhook: HMAC signature verified successfully', [
+        'signature' => substr($receivedSig, 0, 16) . '...',
+    ]);
+
+    return true;
+}
+
+/**
+ * Handle Yuno webhook events
+ *
+ * @param WP_REST_Request $request
+ * @return WP_REST_Response
+ */
+function yuno_handle_webhook(WP_REST_Request $request) {
+    $payload = $request->get_json_params();
+
+    if (empty($payload)) {
+        yuno_log('error', 'Webhook: empty payload', []);
+        // Return 200 to prevent Yuno retries (invalid payload won't be fixed by retry)
+        return yuno_json(['received' => true, 'error' => 'Empty payload'], 200);
+    }
+
+    yuno_log('info', 'Webhook: received event', [
+        'account_id' => $payload['account_id'] ?? null,
+        'type'       => $payload['type'] ?? null,
+        'type_event' => $payload['type_event'] ?? null,
+        'version'    => $payload['version'] ?? null,
+        'retry'      => $payload['retry'] ?? 0,
+    ]);
+
+    // Log full payload in debug mode for troubleshooting
+    if (yuno_debug_enabled()) {
+        yuno_log('debug', 'Webhook: full payload', ['payload' => $payload]);
+    }
+
+    // Extract event type and data
+    $event_type = $payload['type_event'] ?? '';
+    $event_data = $payload['data'] ?? [];
+
+    if (empty($event_type)) {
+        yuno_log('error', 'Webhook: missing type_event', ['payload' => $payload]);
+        return yuno_json(['received' => true, 'error' => 'Missing type_event'], 200);
+    }
+
+    // Extract payment_id from event data (try multiple possible locations)
+    $payment_id = $event_data['id']
+        ?? $event_data['payment_id']
+        ?? $event_data['payment']['id']
+        ?? null;
+
+    if (empty($payment_id)) {
+        yuno_log('error', 'Webhook: missing payment_id in event data', [
+            'event_type' => $event_type,
+            'data_keys'  => array_keys($event_data),
+            'full_data'  => yuno_debug_enabled() ? $event_data : null,
+        ]);
+        return yuno_json(['received' => true, 'error' => 'Missing payment_id'], 200);
+    }
+
+    yuno_log('info', 'Webhook: processing event', [
+        'event_type' => $event_type,
+        'payment_id' => $payment_id,
+    ]);
+
+    // Find order by payment_id
+    $order = yuno_find_order_by_payment_id($payment_id, $event_data);
+
+    if (!$order) {
+        yuno_log('warning', 'Webhook: order not found for payment_id', [
+            'event_type' => $event_type,
+            'payment_id' => $payment_id,
+        ]);
+        // Return 200 to prevent retries (order might not exist yet or payment_id not saved)
+        return yuno_json(['received' => true, 'error' => 'Order not found'], 200);
+    }
+
+    yuno_log('info', 'Webhook: order found', [
+        'event_type'   => $event_type,
+        'payment_id'   => $payment_id,
+        'order_id'     => $order->get_id(),
+        'order_status' => $order->get_status(),
+    ]);
+
+    // Process event based on type
+    switch ($event_type) {
+        case 'payment.purchase':
+        case 'payment.succeeded':
+            return yuno_webhook_handle_payment_succeeded($order, $payment_id, $event_data);
+
+        case 'payment.failed':
+        case 'payment.rejected':
+        case 'payment.declined':
+            return yuno_webhook_handle_payment_failed($order, $payment_id, $event_data);
+
+        case 'payment.chargeback':
+            return yuno_webhook_handle_chargeback($order, $payment_id, $event_data);
+
+        case 'payment.refunds':
+        case 'payment.refund':
+        case 'refunds':
+            return yuno_webhook_handle_refund($order, $payment_id, $event_data);
+
+        default:
+            yuno_log('info', 'Webhook: unhandled event type', [
+                'event_type' => $event_type,
+                'order_id'   => $order->get_id(),
+                'payment_id' => $payment_id,
+            ]);
+
+            // Add note for unhandled events (for debugging)
+            $order->add_order_note('Yuno webhook: ' . $event_type . ' (payment_id=' . $payment_id . ')');
+            $order->save();
+
+            return yuno_json(['received' => true, 'event_type' => $event_type], 200);
+    }
+}
+/**
+ * Find WooCommerce order by Yuno payment_id
+ *
+ * @param string $payment_id
+ * @param array $event_data Optional event data for fallback (merchant_order_id)
+ * @return WC_Order|null
+ */
+function yuno_find_order_by_payment_id($payment_id, $event_data = []) {
+    global $wpdb;
+
+    // Query postmeta for orders with this payment_id
+    $order_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT post_id FROM {$wpdb->postmeta}
+         WHERE meta_key = '_yuno_payment_id'
+         AND meta_value = %s
+         LIMIT 1",
+        $payment_id
+    ));
+
+    // Fallback: extract order_id from merchant_order_id (try multiple locations)
+    $merchant_order_id = $event_data['merchant_order_id']
+        ?? $event_data['payment']['merchant_order_id']
+        ?? null;
+
+    if (!$order_id && !empty($merchant_order_id)) {
+        // Extract order_id from merchant_order_id (format: WC-{order_id})
+        if (preg_match('/^WC-(\d+)$/', $merchant_order_id, $matches)) {
+            $order_id = intval($matches[1]);
+            yuno_log('info', 'Webhook: found order via merchant_order_id fallback', [
+                'payment_id'        => $payment_id,
+                'merchant_order_id' => $merchant_order_id,
+                'order_id'          => $order_id,
+            ]);
+        }
+    }
+
+    if (!$order_id) {
+        return null;
+    }
+
+    $order = wc_get_order($order_id);
+
+    return $order ? $order : null;
+}
+
+/**
+ * Handle payment.succeeded / payment.purchase webhook
+ *
+ * @param WC_Order $order
+ * @param string $payment_id
+ * @param array $event_data
+ * @return WP_REST_Response
+ */
+function yuno_webhook_handle_payment_succeeded($order, $payment_id, $event_data) {
+    $order_id = $order->get_id();
+
+    // Use lock to prevent race condition with frontend confirmation
+    $lockKey = 'yuno_webhook_lock_' . $order_id;
+
+    if (get_transient($lockKey)) {
+        yuno_log('info', 'Webhook: payment.succeeded - already processing', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+        ]);
+        return yuno_json(['received' => true, 'skipped' => 'already_processing'], 200);
+    }
+
+    set_transient($lockKey, 1, 30);
+
+    try {
+        // Check if already paid (idempotency)
+        if ($order->is_paid()) {
+            yuno_log('info', 'Webhook: payment.succeeded - order already paid', [
+                'order_id'     => $order_id,
+                'payment_id'   => $payment_id,
+                'order_status' => $order->get_status(),
+            ]);
+
+            delete_transient($lockKey);
+            return yuno_json(['received' => true, 'skipped' => 'already_paid'], 200);
+        }
+
+        // Mark order as paid
+        $order->payment_complete($payment_id);
+        $order->add_order_note('Yuno webhook: Payment succeeded (payment_id=' . $payment_id . ')');
+        $order->save();
+
+        yuno_log('info', 'Webhook: payment.succeeded - order marked as paid', [
+            'order_id'     => $order_id,
+            'payment_id'   => $payment_id,
+            'order_status' => $order->get_status(),
+        ]);
+
+        delete_transient($lockKey);
+
+        return yuno_json(['received' => true, 'order_updated' => true], 200);
+
+    } catch (Exception $e) {
+        yuno_log('error', 'Webhook: payment.succeeded - error', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+            'error'      => $e->getMessage(),
+        ]);
+
+        delete_transient($lockKey);
+
+        // Return 200 to prevent retries (will log error for manual review)
+        return yuno_json(['received' => true, 'error' => $e->getMessage()], 200);
+    }
+}
+
+/**
+ * Handle payment.failed / payment.rejected webhook
+ *
+ * @param WC_Order $order
+ * @param string $payment_id
+ * @param array $event_data
+ * @return WP_REST_Response
+ */
+function yuno_webhook_handle_payment_failed($order, $payment_id, $event_data) {
+    $order_id = $order->get_id();
+
+    // Extract status from event data
+    $status = yuno_extract_payment_status($event_data);
+
+    yuno_log('info', 'Webhook: payment.failed', [
+        'order_id'     => $order_id,
+        'payment_id'   => $payment_id,
+        'status'       => $status,
+        'order_status' => $order->get_status(),
+    ]);
+
+    // Don't update if already failed
+    if ($order->get_status() === 'failed') {
+        yuno_log('info', 'Webhook: payment.failed - order already failed', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+        ]);
+        return yuno_json(['received' => true, 'skipped' => 'already_failed'], 200);
+    }
+
+    // Don't update if already paid (webhook might be out of order)
+    if ($order->is_paid()) {
+        yuno_log('warning', 'Webhook: payment.failed - order is already paid, ignoring', [
+            'order_id'     => $order_id,
+            'payment_id'   => $payment_id,
+            'order_status' => $order->get_status(),
+        ]);
+        return yuno_json(['received' => true, 'skipped' => 'already_paid'], 200);
+    }
+
+    // Mark as failed
+    $order->update_status('failed', 'Yuno webhook: Payment failed - ' . $status);
+    $order->add_order_note('Yuno webhook: Payment failed (payment_id=' . $payment_id . ', status=' . $status . ')');
+    $order->save();
+
+    yuno_log('info', 'Webhook: payment.failed - order marked as failed', [
+        'order_id'   => $order_id,
+        'payment_id' => $payment_id,
+    ]);
+
+    return yuno_json(['received' => true, 'order_updated' => true], 200);
+}
+
+/**
+ * Handle payment.chargeback webhook
+ *
+ * @param WC_Order $order
+ * @param string $payment_id
+ * @param array $event_data
+ * @return WP_REST_Response
+ */
+function yuno_webhook_handle_chargeback($order, $payment_id, $event_data) {
+    $order_id = $order->get_id();
+
+    yuno_log('warning', 'Webhook: payment.chargeback', [
+        'order_id'     => $order_id,
+        'payment_id'   => $payment_id,
+        'order_status' => $order->get_status(),
+        'event_data'   => $event_data,
+    ]);
+
+    // Add chargeback note
+    $order->add_order_note('⚠️ CHARGEBACK: Yuno reported a chargeback for this payment (payment_id=' . $payment_id . '). Please review.');
+
+    // Optionally update status to on-hold or refunded
+    // We don't auto-refund because chargebacks need manual review
+    if (!in_array($order->get_status(), ['cancelled', 'refunded'], true)) {
+        $order->update_status('on-hold', 'Yuno webhook: Chargeback received - requires manual review');
+    }
+
+    $order->save();
+
+    yuno_log('info', 'Webhook: payment.chargeback - order updated', [
+        'order_id'     => $order_id,
+        'payment_id'   => $payment_id,
+        'order_status' => $order->get_status(),
+    ]);
+
+    return yuno_json(['received' => true, 'order_updated' => true], 200);
+}
+
+/**
+ * Handle payment.refunds webhook
+ *
+ * @param WC_Order $order
+ * @param string $payment_id
+ * @param array $event_data
+ * @return WP_REST_Response
+ */
+function yuno_webhook_handle_refund($order, $payment_id, $event_data) {
+    $order_id = $order->get_id();
+
+    yuno_log('info', 'Webhook: payment.refunds', [
+        'order_id'     => $order_id,
+        'payment_id'   => $payment_id,
+        'order_status' => $order->get_status(),
+        'event_data'   => $event_data,
+    ]);
+
+    // Extract refund amount if available
+    $refund_amount = null;
+    if (isset($event_data['amount']['value'])) {
+        $refund_amount = (float) $event_data['amount']['value'];
+    }
+
+    // Add refund note
+    $note = 'Yuno webhook: Refund processed (payment_id=' . $payment_id . ')';
+    if ($refund_amount !== null) {
+        $note .= ' - Amount: ' . wc_price($refund_amount, ['currency' => $order->get_currency()]);
+    }
+
+    $order->add_order_note($note);
+
+    // Optionally update status to refunded if not already
+    // We don't create WooCommerce refund object automatically because
+    // the refund was processed externally in Yuno
+    if (!in_array($order->get_status(), ['refunded', 'cancelled'], true)) {
+        $order->update_status('refunded', 'Yuno webhook: Order refunded in Yuno');
+    }
+
+    $order->save();
+
+    yuno_log('info', 'Webhook: payment.refunds - order updated', [
+        'order_id'      => $order_id,
+        'payment_id'    => $payment_id,
+        'order_status'  => $order->get_status(),
+        'refund_amount' => $refund_amount,
+    ]);
+
+    return yuno_json(['received' => true, 'order_updated' => true], 200);
 }

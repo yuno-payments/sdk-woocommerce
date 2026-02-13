@@ -8,6 +8,22 @@
   }
   window.YUNO_CHECKOUT_LOADED = true;
 
+  // ✅ Hide SDK loaders globally to prevent "One moment please" flashes
+  const style = document.createElement('style');
+  style.textContent = `
+    /* Hide all Yuno SDK loaders */
+    .yuno-loader,
+    [class*="yuno-loading"],
+    [class*="YunoLoader"],
+    [id*="yuno-loader"],
+    [id*="yuno-loading"] {
+      display: none !important;
+      opacity: 0 !important;
+      visibility: hidden !important;
+    }
+  `;
+  document.head.appendChild(style);
+
   // Guard: Check if API functions are available
   if (!window.YUNO_API) {
     console.error("[YUNO] YUNO_API not found. api.js not loaded.");
@@ -54,12 +70,6 @@ const state = {
   // Render mode: "modal" or "element"
   renderMode: "modal",
 };
-
-function setLoaderVisible(visible) {
-  const loader = document.getElementById("yuno-loader");
-  if (!loader) return;
-  loader.style.display = visible ? "block" : "none";
-}
 
 function setPayButtonVisible(visible) {
   const btn = document.getElementById("yuno-button-pay");
@@ -305,9 +315,6 @@ async function startYunoCheckout() {
     // 3) Initialize SDK
     yunoInstance = await window.Yuno.initialize(publicApiKey);
 
-    let isPayingInsideSdk = false;
-    setLoaderVisible(true);
-
     // Render mode: "modal" (popup) or "element" (embedded)
     const RENDER_MODE_TYPE = "modal";
     state.renderMode = RENDER_MODE_TYPE; // Store in state for access elsewhere
@@ -317,12 +324,8 @@ async function startYunoCheckout() {
       elementSelector: "#yuno-root",
       countryCode: state.countryCode,
       language: ctx.language || "es", // Use WordPress language, fallback to Spanish
-      showLoading: true,
-      keepLoader: true,
-
-      onLoading: () => {
-        if (!isPayingInsideSdk) setLoaderVisible(false);
-      },
+      showLoading: false,  // ✅ Disable SDK loader to prevent "One moment please" flash
+      keepLoader: false,
 
       renderMode: {
         type: RENDER_MODE_TYPE,
@@ -442,9 +445,52 @@ async function startYunoCheckout() {
         if (state.paid) return;
 
         state.paying = true;
-        isPayingInsideSdk = true;
         setPayButtonDisabled(true);
-        setLoaderVisible(true);
+
+        // ✅ Replace page with loader ONLY when SDK confirms fields are valid
+        // This function is called by SDK only after successful validation
+        // IMMEDIATELY replace page with permanent loader to prevent ALL flashing
+        // This happens BEFORE any API calls, so user never sees order-pay flash
+        document.body.innerHTML = `
+          <div style="
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #f7f7f7;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+          ">
+            <div style="text-align: center;">
+              <div style="
+                border: 4px solid #f3f3f3;
+                border-top: 4px solid #000;
+                border-radius: 50%;
+                width: 48px;
+                height: 48px;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 24px;
+              "></div>
+              <div style="font-size: 18px; font-weight: 600; color: #000; margin-bottom: 8px;">
+                Processing payment...
+              </div>
+              <div style="font-size: 14px; color: #666;">
+                Please wait
+              </div>
+            </div>
+          </div>
+          <style>
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          </style>
+          <div id="yuno-checkout"></div>
+        `;
 
         try {
           const payload = {
@@ -475,7 +521,6 @@ async function startYunoCheckout() {
         } catch (e) {
           console.error("[YUNO]  createPayment failed", e);
           state.paying = false;
-          setLoaderVisible(false);
 
           // Re-enable button to allow retry (for both APM and CARD)
           // If card fields are invalid, SDK will show validation errors on next click
@@ -528,6 +573,17 @@ async function startYunoCheckout() {
               // Direct redirect to order-received (no reload to avoid interrupting SDK modal)
               if (confirmRes.redirect) {
                 console.log("[YUNO] Payment confirmed, redirecting to order-received...");
+
+                // Update loader message to indicate success
+                const loaderText = document.querySelector('div[style*="font-size: 18px"]');
+                if (loaderText) {
+                  loaderText.textContent = 'Payment Successful!';
+                }
+                const loaderSubtext = document.querySelector('div[style*="font-size: 14px"]');
+                if (loaderSubtext) {
+                  loaderSubtext.textContent = 'Redirecting to your order confirmation...';
+                }
+
                 window.location.href = confirmRes.redirect;
                 return;
               }
@@ -551,10 +607,6 @@ async function startYunoCheckout() {
                 if (duplicateRes?.ok && duplicateRes?.new_order_id) {
                   console.log("[YUNO] New order created:", duplicateRes.new_order_id);
 
-                  // Hide SDK loader before reinitializing
-                  setLoaderVisible(false);
-                  yunoInstance.hideLoader();
-
                   // Reinitialize with new order (Option B: no redirect, same page)
                   await reinitializeWithNewOrder(
                     duplicateRes.new_order_id,
@@ -574,8 +626,6 @@ async function startYunoCheckout() {
               console.log("[YUNO] Fallback: allowing retry on same order");
               state.paying = false;
               setPayButtonDisabled(false);
-              setLoaderVisible(false);
-              yunoInstance.hideLoader();
               return;
             }
 
@@ -587,9 +637,6 @@ async function startYunoCheckout() {
           console.error("[YUNO] confirmOrder error", e);
           state.paying = false;
           setPayButtonDisabled(false);
-        } finally {
-          setLoaderVisible(false);
-          yunoInstance.hideLoader();
         }
       },
 
@@ -601,8 +648,6 @@ async function startYunoCheckout() {
         });
 
         state.paying = false;
-        setLoaderVisible(false);
-        yunoInstance.hideLoader();
 
         // Re-enable button to allow retry (for both APM and CARD)
         // If card fields are invalid, SDK will show validation errors on next click
@@ -682,6 +727,8 @@ async function handlePayClick(e) {
   if (state.renderMode === "modal") {
     console.log("[YUNO]  Modal mode: button stays enabled, SDK will validate inside modal");
     // Don't set state.paying or disable button here
+    // Don't show loader here - wait for SDK to validate fields first
+    // Loader will be shown in yunoCreatePayment only if fields are valid
   } else {
     //  ELEMENT MODE: Disable button immediately
     // Fields are on the page, so validation is already done

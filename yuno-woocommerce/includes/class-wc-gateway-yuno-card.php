@@ -23,11 +23,56 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     add_action('woocommerce_update_options_payment_gateways_' . $this->id, [$this, 'process_admin_options']);
     add_action('woocommerce_receipt_' . $this->id, [$this, 'receipt_page']);
     add_action('wp_enqueue_scripts', [$this, 'enqueue_scripts']);
+
+    // Early redirect hook: intercept BEFORE headers are sent
+    add_action('template_redirect', [$this, 'early_redirect_paid_orders']);
   }
 
   public function get_title() {
     $t = isset($this->title) ? (string) $this->title : '';
     return $t !== '' ? $t : 'Yuno Card';
+  }
+
+  /**
+   * Early redirect for paid orders (before headers are sent)
+   * Provides instant redirect without rendering the payment page
+   */
+  public function early_redirect_paid_orders() {
+    // Only run on order-pay page
+    if (!function_exists('is_checkout_pay_page') || !is_checkout_pay_page()) {
+      return;
+    }
+
+    global $wp;
+    $order_id = isset($wp->query_vars['order-pay']) ? absint($wp->query_vars['order-pay']) : 0;
+
+    if (!$order_id) {
+      return;
+    }
+
+    $order = wc_get_order($order_id);
+
+    if (!$order) {
+      return;
+    }
+
+    // Only redirect if this is our payment method
+    if ($order->get_payment_method() !== $this->id) {
+      return;
+    }
+
+    // Check if order is already paid
+    $paid_statuses = ['processing', 'completed', 'on-hold'];
+
+    if ($order->is_paid() || in_array($order->get_status(), $paid_statuses, true)) {
+      yuno_log('info', 'Early redirect: order already paid', [
+        'order_id' => $order_id,
+        'status'   => $order->get_status(),
+      ]);
+
+      wp_safe_redirect($order->get_checkout_order_received_url());
+      exit;
+    }
   }
 
   public function init_form_fields() {
@@ -105,6 +150,29 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
         'label'       => 'Enable debug logs',
         'default'     => 'no',
         'description' => 'Log events using WooCommerce logger.',
+      ],
+
+      // Webhook security settings
+      'webhook_hmac_secret' => [
+        'title'       => 'Webhook HMAC Secret',
+        'type'        => 'password',
+        'description' => 'Client Secret Key from Yuno Dashboard (Webhooks section). Used to verify webhook signatures.',
+        'default'     => '',
+        'desc_tip'    => true,
+      ],
+      'webhook_api_key' => [
+        'title'       => 'Webhook API Key',
+        'type'        => 'password',
+        'description' => 'x-api-key header value configured in Yuno Dashboard webhooks.',
+        'default'     => '',
+        'desc_tip'    => true,
+      ],
+      'webhook_x_secret' => [
+        'title'       => 'Webhook X-Secret',
+        'type'        => 'password',
+        'description' => 'x-secret header value configured in Yuno Dashboard webhooks.',
+        'default'     => '',
+        'desc_tip'    => true,
       ],
     ];
   }
@@ -238,17 +306,81 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
         'status'   => $order_status,
       ]);
 
-      // Check if headers were already sent (receipt_page runs after get_header())
-      // If headers sent, use JavaScript redirect to avoid PHP warning
-      if (!headers_sent()) {
-        wp_safe_redirect($order->get_checkout_order_received_url());
-        exit;
-      } else {
-        // Fallback: JavaScript redirect (works even after headers sent)
-        echo '<script type="text/javascript">window.location.href = "' . esc_url($order->get_checkout_order_received_url()) . '";</script>';
-        echo '<noscript><meta http-equiv="refresh" content="0;url=' . esc_url($order->get_checkout_order_received_url()) . '"></noscript>';
-        return;
-      }
+      // Show minimal loader with instant redirect
+      // This provides better UX than showing the full payment page and then redirecting
+      $redirect_url = esc_url($order->get_checkout_order_received_url());
+      ?>
+      <!DOCTYPE html>
+      <html <?php language_attributes(); ?>>
+      <head>
+        <meta charset="<?php bloginfo('charset'); ?>">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="refresh" content="0;url=<?php echo $redirect_url; ?>">
+        <title><?php echo esc_html__('Redirecting...', 'yuno'); ?></title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #f7f7f7;
+            color: #333;
+          }
+          .redirect-container {
+            text-align: center;
+            padding: 40px 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-width: 400px;
+          }
+          .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #000;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 24px;
+          }
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #000;
+          }
+          p {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.5;
+          }
+          .success-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+          }
+        </style>
+        <script>
+          // Immediate redirect (faster than meta refresh)
+          window.location.href = <?php echo wp_json_encode($redirect_url); ?>;
+        </script>
+      </head>
+      <body>
+        <div class="redirect-container">
+          <div class="success-icon">✓</div>
+          <h2><?php echo esc_html__('Payment Successful!', 'yuno'); ?></h2>
+          <p><?php echo esc_html__('Redirecting to your order confirmation...', 'yuno'); ?></p>
+          <div class="spinner"></div>
+        </div>
+      </body>
+      </html>
+      <?php
+      exit;
     }
 
     yuno_log('debug', 'receipt_page - showing payment page', [
