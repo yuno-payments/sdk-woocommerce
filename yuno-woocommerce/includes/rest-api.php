@@ -982,6 +982,133 @@ function yuno_check_order_status(WP_REST_Request $request) {
  * Duplicate a failed order with the same products and customer data
  * Used when a payment fails and we want to allow retry with a new order
  */
+/**
+ * Internal helper to create a duplicate order
+ * Used by both REST endpoint and webhook
+ *
+ * @param WC_Order $order Original order to duplicate
+ * @return WC_Order|WP_Error New order or error
+ */
+function yuno_create_duplicate_order_internal($order) {
+    // Create new order
+    $new_order = wc_create_order();
+
+    // Check if order creation failed (wc_create_order can return WP_Error)
+    if (is_wp_error($new_order)) {
+        yuno_log('error', 'Duplicate order: wc_create_order failed', [
+            'original_order_id' => $order->get_id(),
+            'error_code'        => $new_order->get_error_code(),
+            'error_message'     => $new_order->get_error_message(),
+        ]);
+        return $new_order; // Return WP_Error
+    }
+
+    // Copy all line items from original order (clone to preserve original prices)
+    // Using add_product() would use current prices, not original order prices
+    foreach ($order->get_items() as $item_id => $item) {
+        $cloned_item = clone $item;
+        $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+        $new_order->add_item($cloned_item);
+    }
+
+    // Copy shipping items (clone to avoid mutating original order items)
+    foreach ($order->get_items('shipping') as $item_id => $item) {
+        $cloned_item = clone $item;
+        $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+        $new_order->add_item($cloned_item);
+    }
+
+    // Copy fees (clone to avoid mutating original order items)
+    foreach ($order->get_items('fee') as $item_id => $item) {
+        $cloned_item = clone $item;
+        $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+        $new_order->add_item($cloned_item);
+    }
+
+    // Copy coupons (CRITICAL: preserve discounts from original order)
+    foreach ($order->get_items('coupon') as $item_id => $item) {
+        $cloned_item = clone $item;
+        $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
+        $new_order->add_item($cloned_item);
+    }
+
+    // Copy customer data
+    $new_order->set_customer_id($order->get_customer_id());
+
+    // Copy billing address
+    $new_order->set_billing_first_name($order->get_billing_first_name());
+    $new_order->set_billing_last_name($order->get_billing_last_name());
+    $new_order->set_billing_company($order->get_billing_company());
+    $new_order->set_billing_address_1($order->get_billing_address_1());
+    $new_order->set_billing_address_2($order->get_billing_address_2());
+    $new_order->set_billing_city($order->get_billing_city());
+    $new_order->set_billing_state($order->get_billing_state());
+    $new_order->set_billing_postcode($order->get_billing_postcode());
+    $new_order->set_billing_country($order->get_billing_country());
+    $new_order->set_billing_email($order->get_billing_email());
+    $new_order->set_billing_phone($order->get_billing_phone());
+
+    // Copy shipping address
+    $new_order->set_shipping_first_name($order->get_shipping_first_name());
+    $new_order->set_shipping_last_name($order->get_shipping_last_name());
+    $new_order->set_shipping_company($order->get_shipping_company());
+    $new_order->set_shipping_address_1($order->get_shipping_address_1());
+    $new_order->set_shipping_address_2($order->get_shipping_address_2());
+    $new_order->set_shipping_city($order->get_shipping_city());
+    $new_order->set_shipping_state($order->get_shipping_state());
+    $new_order->set_shipping_postcode($order->get_shipping_postcode());
+    $new_order->set_shipping_country($order->get_shipping_country());
+
+    // Set payment method
+    $new_order->set_payment_method($order->get_payment_method());
+    $new_order->set_payment_method_title($order->get_payment_method_title());
+
+    // Set currency
+    $new_order->set_currency($order->get_currency());
+
+    // Copy totals from original order (do NOT recalculate)
+    // Using calculate_totals() would apply current tax rates/coupons, potentially changing amounts
+    $new_order->set_discount_total($order->get_discount_total());
+    $new_order->set_discount_tax($order->get_discount_tax());
+    $new_order->set_shipping_total($order->get_shipping_total());
+    $new_order->set_shipping_tax($order->get_shipping_tax());
+    $new_order->set_cart_tax($order->get_cart_tax());
+    $new_order->set_total($order->get_total());
+
+    // Set status to pending
+    $new_order->set_status('pending', 'Order created from failed order #' . $order->get_id());
+
+    // Save the new order
+    $new_order->save();
+
+    // Store metadata linking failed order to duplicate (prevents creating multiple duplicates)
+    $order->update_meta_data('_yuno_duplicate_order_id', $new_order->get_id());
+    $order->save();
+
+    // Store reference to original order in duplicate
+    $new_order->update_meta_data('_yuno_original_order_id', $order->get_id());
+    $new_order->save();
+
+    // Add note to original order
+    $order->add_order_note('New order #' . $new_order->get_id() . ' created for payment retry.');
+    $order->save();
+
+    // Add note to new order
+    $new_order->add_order_note('Created from failed order #' . $order->get_id() . ' for payment retry.');
+    $new_order->save();
+
+    yuno_log('info', 'Duplicate order: success', [
+        'original_order_id' => $order->get_id(),
+        'new_order_id'      => $new_order->get_id(),
+    ]);
+
+    return $new_order;
+}
+
+/**
+ * REST endpoint: Duplicate order (create new order from failed one)
+ * Used by frontend when payment fails to allow retry with new order
+ */
 function yuno_duplicate_order(WP_REST_Request $request) {
     [$order, $err] = yuno_get_order_from_request($request);
     if ($err) return $err;
@@ -992,113 +1119,40 @@ function yuno_duplicate_order(WP_REST_Request $request) {
     ]);
 
     try {
-        // Create new order
-        $new_order = wc_create_order();
+        // ✅ FIX: Check if webhook already created a duplicate order
+        $existing_duplicate_id = $order->get_meta('_yuno_duplicate_order_id');
 
-        // Check if order creation failed (wc_create_order can return WP_Error)
+        if ($existing_duplicate_id) {
+            $existing_order = wc_get_order($existing_duplicate_id);
+
+            // Verify duplicate order exists and is still pending (not paid/failed/cancelled)
+            if ($existing_order && in_array($existing_order->get_status(), ['pending', 'on-hold'], true)) {
+                yuno_log('info', 'Duplicate order: reusing existing duplicate created by webhook', [
+                    'original_order_id' => $order->get_id(),
+                    'existing_order_id' => $existing_order->get_id(),
+                ]);
+
+                return yuno_json([
+                    'ok'            => true,
+                    'new_order_id'  => $existing_order->get_id(),
+                    'new_order_key' => $existing_order->get_order_key(),
+                    'pay_url'       => $existing_order->get_checkout_payment_url(true),
+                    'total'         => (float) $existing_order->get_total(),
+                    'formatted_total' => wp_kses_post($existing_order->get_formatted_order_total()),
+                    'reused'        => true, // Indicate this was reused, not newly created
+                ], 200);
+            }
+        }
+
+        // No existing duplicate found, create new one
+        $new_order = yuno_create_duplicate_order_internal($order);
+
         if (is_wp_error($new_order)) {
-            yuno_log('error', 'Duplicate order: wc_create_order failed', [
-                'original_order_id' => $order->get_id(),
-                'error_code'        => $new_order->get_error_code(),
-                'error_message'     => $new_order->get_error_message(),
-            ]);
-
             return yuno_json([
                 'error'   => 'Failed to create new order',
                 'message' => $new_order->get_error_message(),
             ], 500);
         }
-
-        // Copy all line items from original order (clone to preserve original prices)
-        // Using add_product() would use current prices, not original order prices
-        foreach ($order->get_items() as $item_id => $item) {
-            $cloned_item = clone $item;
-            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
-            $new_order->add_item($cloned_item);
-        }
-
-        // Copy shipping items (clone to avoid mutating original order items)
-        foreach ($order->get_items('shipping') as $item_id => $item) {
-            $cloned_item = clone $item;
-            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
-            $new_order->add_item($cloned_item);
-        }
-
-        // Copy fees (clone to avoid mutating original order items)
-        foreach ($order->get_items('fee') as $item_id => $item) {
-            $cloned_item = clone $item;
-            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
-            $new_order->add_item($cloned_item);
-        }
-
-        // Copy coupons (CRITICAL: preserve discounts from original order)
-        foreach ($order->get_items('coupon') as $item_id => $item) {
-            $cloned_item = clone $item;
-            $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
-            $new_order->add_item($cloned_item);
-        }
-
-        // Copy customer data
-        $new_order->set_customer_id($order->get_customer_id());
-
-        // Copy billing address
-        $new_order->set_billing_first_name($order->get_billing_first_name());
-        $new_order->set_billing_last_name($order->get_billing_last_name());
-        $new_order->set_billing_company($order->get_billing_company());
-        $new_order->set_billing_address_1($order->get_billing_address_1());
-        $new_order->set_billing_address_2($order->get_billing_address_2());
-        $new_order->set_billing_city($order->get_billing_city());
-        $new_order->set_billing_state($order->get_billing_state());
-        $new_order->set_billing_postcode($order->get_billing_postcode());
-        $new_order->set_billing_country($order->get_billing_country());
-        $new_order->set_billing_email($order->get_billing_email());
-        $new_order->set_billing_phone($order->get_billing_phone());
-
-        // Copy shipping address
-        $new_order->set_shipping_first_name($order->get_shipping_first_name());
-        $new_order->set_shipping_last_name($order->get_shipping_last_name());
-        $new_order->set_shipping_company($order->get_shipping_company());
-        $new_order->set_shipping_address_1($order->get_shipping_address_1());
-        $new_order->set_shipping_address_2($order->get_shipping_address_2());
-        $new_order->set_shipping_city($order->get_shipping_city());
-        $new_order->set_shipping_state($order->get_shipping_state());
-        $new_order->set_shipping_postcode($order->get_shipping_postcode());
-        $new_order->set_shipping_country($order->get_shipping_country());
-
-        // Set payment method
-        $new_order->set_payment_method($order->get_payment_method());
-        $new_order->set_payment_method_title($order->get_payment_method_title());
-
-        // Set currency
-        $new_order->set_currency($order->get_currency());
-
-        // Copy totals from original order (do NOT recalculate)
-        // Using calculate_totals() would apply current tax rates/coupons, potentially changing amounts
-        $new_order->set_discount_total($order->get_discount_total());
-        $new_order->set_discount_tax($order->get_discount_tax());
-        $new_order->set_shipping_total($order->get_shipping_total());
-        $new_order->set_shipping_tax($order->get_shipping_tax());
-        $new_order->set_cart_tax($order->get_cart_tax());
-        $new_order->set_total($order->get_total());
-
-        // Set status to pending
-        $new_order->set_status('pending', 'Order created from failed order #' . $order->get_id());
-
-        // Save the new order
-        $new_order->save();
-
-        // Add note to original order
-        $order->add_order_note('New order #' . $new_order->get_id() . ' created for payment retry.');
-        $order->save();
-
-        // Add note to new order
-        $new_order->add_order_note('Created from failed order #' . $order->get_id() . ' for payment retry.');
-        $new_order->save();
-
-        yuno_log('info', 'Duplicate order: success', [
-            'original_order_id' => $order->get_id(),
-            'new_order_id'      => $new_order->get_id(),
-        ]);
 
         return yuno_json([
             'ok'            => true,
@@ -1402,7 +1456,87 @@ function yuno_webhook_handle_payment_succeeded($order, $payment_id, $event_data)
             return yuno_json(['received' => true, 'skipped' => 'already_paid'], 200);
         }
 
-        // Mark order as paid
+        // ✅ CRITICAL: Verify payment status with Yuno API before marking as paid
+        // Don't trust webhook event alone - always verify with API
+        $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+        $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
+
+        if ($publicKey && $secretKey) {
+            $apiUrl = yuno_api_url_from_public_key($publicKey);
+
+            yuno_log('info', 'Webhook: payment.succeeded - verifying with Yuno API', [
+                'order_id'   => $order_id,
+                'payment_id' => $payment_id,
+            ]);
+
+            $res = yuno_wp_remote_json(
+                'GET',
+                "{$apiUrl}/v1/payments/{$payment_id}",
+                [
+                    'public-api-key'     => $publicKey,
+                    'private-secret-key' => $secretKey,
+                ],
+                null,
+                15
+            );
+
+            if ($res['ok']) {
+                $verified_status = yuno_extract_payment_status($res['raw']);
+
+                yuno_log('info', 'Webhook: payment.succeeded - verified status from API', [
+                    'order_id'         => $order_id,
+                    'payment_id'       => $payment_id,
+                    'verified_status'  => $verified_status,
+                ]);
+
+                // If payment is NOT actually succeeded, mark as failed instead
+                if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
+                    yuno_log('warning', 'Webhook: payment.succeeded event but API shows FAILED - marking as failed', [
+                        'order_id'        => $order_id,
+                        'payment_id'      => $payment_id,
+                        'verified_status' => $verified_status,
+                    ]);
+
+                    $order->update_status('failed', 'Yuno webhook: Payment succeeded event received but API verification shows: ' . $verified_status);
+                    $order->add_order_note('Yuno webhook: Payment succeeded event received but verification failed. status=' . $verified_status . ' payment_id=' . $payment_id);
+                    $order->save();
+
+                    delete_transient($lockKey);
+
+                    // Auto-create duplicate order for retry
+                    try {
+                        $new_order = yuno_create_duplicate_order_internal($order);
+                        if (!is_wp_error($new_order)) {
+                            yuno_log('info', 'Webhook: payment.succeeded (but failed) - new order created', [
+                                'old_order_id' => $order_id,
+                                'new_order_id' => $new_order->get_id(),
+                            ]);
+                        }
+                    } catch (Exception $e) {
+                        yuno_log('error', 'Webhook: failed to create duplicate order', ['error' => $e->getMessage()]);
+                    }
+
+                    return yuno_json(['received' => true, 'order_updated' => true, 'status' => 'failed'], 200);
+                }
+
+                // If payment is not confirmed as succeeded, don't mark as paid yet
+                if (!in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
+                    yuno_log('warning', 'Webhook: payment.succeeded event but status not confirmed', [
+                        'order_id'        => $order_id,
+                        'payment_id'      => $payment_id,
+                        'verified_status' => $verified_status,
+                    ]);
+
+                    $order->add_order_note('Yuno webhook: Payment succeeded event received but status is: ' . $verified_status . ' (payment_id=' . $payment_id . ')');
+                    $order->save();
+
+                    delete_transient($lockKey);
+                    return yuno_json(['received' => true, 'status' => 'pending_confirmation'], 200);
+                }
+            }
+        }
+
+        // Mark order as paid (only if verified or no API keys to verify)
         $order->payment_complete($payment_id);
         $order->add_order_note('Yuno webhook: Payment succeeded (payment_id=' . $payment_id . ')');
         $order->save();
@@ -1481,7 +1615,42 @@ function yuno_webhook_handle_payment_failed($order, $payment_id, $event_data) {
         'payment_id' => $payment_id,
     ]);
 
-    return yuno_json(['received' => true, 'order_updated' => true], 200);
+    // ✅ AUTO-CREATE NEW ORDER: Create duplicate order for retry (same as frontend behavior)
+    try {
+        $new_order = yuno_create_duplicate_order_internal($order);
+
+        if (is_wp_error($new_order)) {
+            yuno_log('error', 'Webhook: payment.failed - failed to create duplicate order', [
+                'order_id'      => $order_id,
+                'payment_id'    => $payment_id,
+                'error_message' => $new_order->get_error_message(),
+            ]);
+            // Return success anyway (original order was updated, duplicate is optional)
+            return yuno_json(['received' => true, 'order_updated' => true, 'duplicate_failed' => true], 200);
+        }
+
+        yuno_log('info', 'Webhook: payment.failed - new order created for retry', [
+            'old_order_id' => $order_id,
+            'new_order_id' => $new_order->get_id(),
+            'payment_id'   => $payment_id,
+        ]);
+
+        return yuno_json([
+            'received'      => true,
+            'order_updated' => true,
+            'new_order_created' => true,
+            'new_order_id'  => $new_order->get_id(),
+        ], 200);
+
+    } catch (Exception $e) {
+        yuno_log('error', 'Webhook: payment.failed - exception creating duplicate', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+            'error'      => $e->getMessage(),
+        ]);
+        // Return success anyway (original order was updated, duplicate is optional)
+        return yuno_json(['received' => true, 'order_updated' => true, 'duplicate_failed' => true], 200);
+    }
 }
 
 /**

@@ -438,7 +438,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
         'yuno-checkout',
         plugin_dir_url(__DIR__) . 'assets/css/checkout.css',
         [],
-        filemtime(plugin_dir_path(__DIR__) . 'assets/css/checkout.css')
+        YUNO_WC_VERSION
       );
       return;
     }
@@ -460,7 +460,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       'yuno-checkout',
       plugin_dir_url(__DIR__) . 'assets/css/checkout.css',
       [],
-      filemtime(plugin_dir_path(__DIR__) . 'assets/css/checkout.css')
+      YUNO_WC_VERSION
     );
 
     wp_enqueue_script(
@@ -475,7 +475,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       'yuno-api',
       plugin_dir_url(__DIR__) . 'assets/js/api.js',
       [],
-      filemtime(plugin_dir_path(__DIR__) . 'assets/js/api.js'),
+      YUNO_WC_VERSION,
       true
     );
 
@@ -483,7 +483,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       'yuno-checkout',
       plugin_dir_url(__DIR__) . 'assets/js/checkout.js',
       ['yuno-api', 'yuno-sdk'],
-      filemtime(plugin_dir_path(__DIR__) . 'assets/js/checkout.js'),
+      YUNO_WC_VERSION,
       true
     );
 
