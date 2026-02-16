@@ -1098,14 +1098,57 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
 
     // Handle verified status
     if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
+        // ✅ DEBUG: Log product types before payment_complete()
+        $order_items_debug = [];
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if ($product) {
+                $order_items_debug[] = [
+                    'name'         => $product->get_name(),
+                    'is_virtual'   => $product->is_virtual() ? 'YES' : 'NO',
+                    'is_downloadable' => $product->is_downloadable() ? 'YES' : 'NO',
+                    'needs_shipping' => $product->needs_shipping() ? 'YES' : 'NO',
+                ];
+            }
+        }
+
+        // ✅ DEBUG: Check if there are any filters affecting payment_complete status
+        global $wp_filter;
+        $active_filters = [];
+        if (isset($wp_filter['woocommerce_payment_complete_order_status'])) {
+            $active_filters['payment_complete_order_status'] = 'ACTIVE';
+        }
+        if (isset($wp_filter['woocommerce_order_is_paid_statuses'])) {
+            $active_filters['order_is_paid_statuses'] = 'ACTIVE';
+        }
+
+        yuno_log('info', 'Confirm: order product analysis BEFORE payment_complete()', [
+            'order_id'            => $order->get_id(),
+            'needs_shipping'      => $order->needs_shipping_address() ? 'YES' : 'NO',
+            'has_downloadable'    => $order->has_downloadable_item() ? 'YES' : 'NO',
+            'products'            => $order_items_debug,
+            'current_status'      => $order->get_status(),
+            'active_filters'      => $active_filters ?: 'NONE',
+        ]);
+
         $order->payment_complete($payment_id);
+
+        // ✅ DEBUG: Check status immediately after payment_complete(), BEFORE save()
+        $status_after_payment_complete = $order->get_status();
+
         $order->add_order_note('Yuno payment approved (verified). status=' . $verified_status . ' payment_id=' . $payment_id);
         $order->save();
 
-        yuno_log('info', 'Confirm: order marked as paid', [
-            'order_id'     => $order->get_id(),
-            'payment_id'   => $payment_id,
-            'order_status' => $order->get_status(),
+        // ✅ DEBUG: Check status again after save()
+        $status_after_save = $order->get_status();
+
+        yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete()', [
+            'order_id'                      => $order->get_id(),
+            'payment_id'                    => $payment_id,
+            'status_after_payment_complete' => $status_after_payment_complete,
+            'status_after_save'             => $status_after_save,
+            'needs_shipping'                => $order->needs_shipping_address() ? 'YES' : 'NO',
+            'expected'                      => $order->needs_shipping_address() ? 'processing' : 'completed',
         ]);
 
         return yuno_json([
@@ -1137,14 +1180,24 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    // Intermediate states (PENDING, PROCESSING, REQUIRES_ACTION, etc.)
+    // ✅ Intermediate states (PENDING, PROCESSING, REQUIRES_ACTION, etc.)
+    // Change order status to 'on-hold' to indicate payment is processing
+    // WooCommerce status meanings:
+    // - 'pending' = Waiting for payment (order created but no payment initiated)
+    // - 'on-hold' = Payment received/processing, waiting for confirmation
+    // - 'processing' = Payment confirmed, order being fulfilled
+    if (in_array($verified_status, ['PENDING', 'PROCESSING', 'REQUIRES_ACTION'], true)) {
+        $order->update_status('on-hold', 'Yuno payment pending confirmation: ' . $verified_status);
+    }
+
     $order->add_order_note('Yuno payment status: ' . $verified_status . ' (payment_id=' . $payment_id . ')');
     $order->save();
 
-    yuno_log('info', 'Confirm: payment in intermediate state', [
-        'order_id'   => $order->get_id(),
-        'payment_id' => $payment_id,
-        'status'     => $verified_status,
+    yuno_log('info', 'Confirm: payment in intermediate state, order set to on-hold', [
+        'order_id'     => $order->get_id(),
+        'payment_id'   => $payment_id,
+        'yuno_status'  => $verified_status,
+        'order_status' => $order->get_status(),
     ]);
 
     return yuno_json([
