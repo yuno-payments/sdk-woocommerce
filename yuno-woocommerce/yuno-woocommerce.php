@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Yuno WooCommerce Gateway
  * Description: Yuno payment gateway integration for WooCommerce.
- * Version: 0.4.0
+ * Version: 0.5.0
  */
 
 if (!defined('ABSPATH')) exit;
 
 // Define plugin version constant for asset versioning
-define('YUNO_WC_VERSION', '0.4.0');
+define('YUNO_WC_VERSION', '0.5.0');
 
 // Ensure WooCommerce is active
 add_action('plugins_loaded', function () {

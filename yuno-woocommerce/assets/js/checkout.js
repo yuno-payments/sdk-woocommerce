@@ -519,83 +519,6 @@ async function startYunoCheckout() {
           state.lastPaymentId = paymentRes?.payment_id || paymentRes?.response?.id || null;
 
           console.log("[YUNO] createPayment ", paymentRes);
-
-          // ✅ Handle PENDING payments: Let SDK render, detect message, then redirect after user reads it
-          if (paymentRes?.response?.status === 'PENDING') {
-            console.log("[YUNO] Payment is PENDING, will wait for SDK to show message...");
-
-            // Function to check if SDK message is visible
-            const checkForSDKMessage = () => {
-              const sdkContainers = ['#yuno-root', '#yuno-apm-form', '#yuno-action-form', '#yuno-checkout'];
-              for (const selector of sdkContainers) {
-                const container = document.querySelector(selector);
-                if (container && container.textContent.includes('Transactions in progress')) {
-                  return true;
-                }
-              }
-              return false;
-            };
-
-            // Function to handle redirect after message is shown
-            const handlePendingRedirect = async () => {
-              console.log("[YUNO] PENDING payment - confirming status and redirecting...");
-
-              try {
-                const confirmRes = await confirmOrder({
-                  orderId: state.orderId,
-                  orderKey: state.orderKey,
-                  order_id: state.orderId,
-                  order_key: state.orderKey,
-                  paymentId: state.lastPaymentId,
-                  payment_id: state.lastPaymentId,
-                });
-
-                console.log("[YUNO] confirmOrder for PENDING payment:", confirmRes);
-
-                if (confirmRes?.redirect) {
-                  console.log("[YUNO] Redirecting to order-received:", confirmRes.redirect);
-                  window.location.href = confirmRes.redirect;
-                  return;
-                }
-
-                console.log("[YUNO] No redirect URL, reloading...");
-                window.location.reload();
-              } catch (e) {
-                console.error("[YUNO] Error confirming PENDING payment:", e);
-                window.location.reload();
-              }
-            };
-
-            // Wait for SDK to render (give it time after continuePayment is called)
-            setTimeout(() => {
-              console.log("[YUNO] Starting to check for SDK message...");
-
-              // Check for SDK message every 500ms, with max timeout of 15 seconds
-              let checkCount = 0;
-              const maxChecks = 30; // 30 checks * 500ms = 15 seconds max wait
-              const checkInterval = setInterval(() => {
-                checkCount++;
-
-                if (checkForSDKMessage()) {
-                  console.log("[YUNO] SDK message detected! Now waiting 5 seconds for user to read...");
-                  clearInterval(checkInterval);
-
-                  // NOW start counting: wait 5 seconds after message appears, then redirect
-                  setTimeout(handlePendingRedirect, 5000);
-                  return;
-                }
-
-                // Safety timeout: if message not found after 15 seconds, redirect anyway
-                if (checkCount >= maxChecks) {
-                  console.log("[YUNO] SDK message not detected after 15s, redirecting anyway (safety timeout)...");
-                  clearInterval(checkInterval);
-                  handlePendingRedirect();
-                }
-              }, 500);
-            }, 1000); // Wait 1 second for SDK to render before we start checking
-
-            // DON'T return - let continuePayment() be called in finally block
-          }
         } catch (e) {
           console.error("[YUNO]  createPayment failed", e);
           state.paying = false;
@@ -608,8 +531,7 @@ async function startYunoCheckout() {
 
           throw e;
         } finally {
-          // Always call continuePayment to let SDK render its UI
-          // For PENDING payments, we set up listeners above to detect the message and redirect
+          // Always call continuePayment to let SDK render its UI (3DS, PENDING, etc.)
           yunoInstance.continuePayment();
         }
       },
@@ -647,6 +569,15 @@ async function startYunoCheckout() {
 
             //  Backend verifies with Yuno API and updates order status
             if (confirmRes?.ok) {
+              // ✅ For PENDING payments (3DS, etc.), DON'T redirect
+              // Let SDK handle the flow, webhook will confirm when payment completes
+              if (confirmRes.pending) {
+                console.log("[YUNO] Payment is PENDING, staying on page for 3DS/authentication flow...");
+                // Don't mark as paid, don't redirect, let SDK continue
+                return;
+              }
+
+              // Payment confirmed (SUCCEEDED, VERIFIED, APPROVED)
               state.paid = true;
               setPayButtonDisabled(true);
 
