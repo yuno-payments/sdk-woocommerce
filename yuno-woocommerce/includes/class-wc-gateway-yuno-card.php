@@ -26,6 +26,9 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
     // Early redirect hook: intercept BEFORE headers are sent
     add_action('template_redirect', [$this, 'early_redirect_paid_orders']);
+
+    // Checkout validation: validate required fields BEFORE order creation
+    add_action('woocommerce_after_checkout_validation', [$this, 'validate_checkout_fields'], 10, 2);
   }
 
   public function get_title() {
@@ -72,6 +75,80 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
       wp_safe_redirect($order->get_checkout_order_received_url());
       exit;
+    }
+  }
+
+  /**
+   * Validate checkout fields before order creation
+   * Only runs when Yuno Card is the selected payment method
+   *
+   * @param array $data Posted checkout data
+   * @param WP_Error $errors Error object to add validation errors
+   */
+  public function validate_checkout_fields($data, $errors) {
+    // Only validate if Yuno Card is the selected payment method
+    if (!isset($data['payment_method']) || $data['payment_method'] !== $this->id) {
+      return;
+    }
+
+    yuno_log('info', 'Checkout validation: starting', [
+      'payment_method' => $data['payment_method'],
+    ]);
+
+    // Validate required fields for Yuno Customer API
+    $billing_first_name = isset($data['billing_first_name']) ? trim($data['billing_first_name']) : '';
+    $billing_last_name  = isset($data['billing_last_name']) ? trim($data['billing_last_name']) : '';
+    $billing_email      = isset($data['billing_email']) ? trim($data['billing_email']) : '';
+    $billing_phone      = isset($data['billing_phone']) ? trim($data['billing_phone']) : '';
+    $billing_country    = isset($data['billing_country']) ? trim($data['billing_country']) : '';
+
+    // Validate name (first name OR last name required for customer name)
+    if (empty($billing_first_name) && empty($billing_last_name)) {
+      $errors->add('validation', 'Por favor ingresa tu nombre para procesar el pago con Yuno.');
+      yuno_log('warning', 'Checkout validation: missing name', [
+        'billing_first_name' => $billing_first_name,
+        'billing_last_name'  => $billing_last_name,
+      ]);
+    }
+
+    // Validate email (required for Yuno Customer)
+    if (empty($billing_email)) {
+      $errors->add('validation', 'Por favor ingresa tu email para procesar el pago con Yuno.');
+      yuno_log('warning', 'Checkout validation: missing email');
+    }
+
+    // Validate phone format (must be formattable with country code)
+    if (!empty($billing_phone)) {
+      // Use the same formatting function we use in the backend
+      $formatted_phone = yuno_format_phone_number($billing_phone, $billing_country);
+
+      if (empty($formatted_phone)) {
+        // Phone couldn't be formatted (either country not supported or invalid format)
+        $errors->add('validation', sprintf(
+          'El número de teléfono no es válido para el país seleccionado (%s). Por favor verifica el número o selecciona un país diferente.',
+          $billing_country
+        ));
+        yuno_log('warning', 'Checkout validation: invalid phone', [
+          'billing_phone'   => $billing_phone,
+          'billing_country' => $billing_country,
+        ]);
+      } else {
+        yuno_log('info', 'Checkout validation: phone validated', [
+          'billing_phone'   => $billing_phone,
+          'billing_country' => $billing_country,
+          'formatted_phone' => $formatted_phone,
+        ]);
+      }
+    }
+
+    // Log validation result
+    if ($errors->has_errors()) {
+      yuno_log('warning', 'Checkout validation: failed', [
+        'error_count' => count($errors->get_error_messages()),
+        'errors'      => $errors->get_error_messages(),
+      ]);
+    } else {
+      yuno_log('info', 'Checkout validation: passed');
     }
   }
 

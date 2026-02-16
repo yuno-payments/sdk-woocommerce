@@ -174,9 +174,23 @@ function yuno_get_order_from_request(WP_REST_Request $request) {
 }
 
 function yuno_build_idempotency_key($order_id, $checkout_session) {
-    $base = ((int)$order_id) . '|' . ((string)$checkout_session) . '|' . get_site_url();
+    // Get payment attempt count from order meta
+    $order = wc_get_order($order_id);
+    $attempt_count = 0;
+
+    if ($order) {
+        $attempt_count = (int) $order->get_meta('_yuno_payment_attempt_count', true);
+
+        // Increment attempt count for this payment try
+        $attempt_count++;
+        $order->update_meta_data('_yuno_payment_attempt_count', $attempt_count);
+        $order->save();
+    }
+
+    // Include attempt count in idempotency key to allow retries
+    $base = ((int)$order_id) . '|' . ((string)$checkout_session) . '|attempt-' . $attempt_count . '|' . get_site_url();
     $hash = wp_hash($base, 'auth');
-    return 'wc-' . (int)$order_id . '-yuno-' . substr($hash, 0, 24);
+    return 'wc-' . (int)$order_id . '-a' . $attempt_count . '-' . substr($hash, 0, 20);
 }
 
 function yuno_debug_enabled() {
@@ -269,15 +283,17 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ], 409);
     }
 
-    $existingSession = (string) $order->get_meta('_yuno_checkout_session');
-    if (!empty($existingSession)) {
-        return yuno_json([
-            'checkout_session' => $existingSession,
-            'country'          => $order->get_billing_country() ?: 'CO',
-            'order_id'         => $order->get_id(),
-            'reused'           => true,
-        ], 200);
-    }
+    // ✅ FIX: ALWAYS create new checkout session (never reuse)
+    // Reusing checkout sessions can cause INVALID_CUSTOMER_FOR_TOKEN errors when:
+    // - customer_id in order meta doesn't match customer_id in old checkout session
+    // - This happens after order duplication, customer changes, or retry scenarios
+    // Creating a fresh checkout session ensures customer_id consistency
+    //
+    // Old behavior (REMOVED):
+    // $existingSession = (string) $order->get_meta('_yuno_checkout_session');
+    // if (!empty($existingSession)) {
+    //     return yuno_json(['checkout_session' => $existingSession, ...], 200);
+    // }
 
     $apiUrl = yuno_api_url_from_public_key($publicKey);
 
@@ -295,6 +311,18 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         'amount_value'  => $amount_value,
     ]);
 
+    // ✅ Try to get or create Yuno Customer (optional, graceful degradation)
+    yuno_log('info', '🔵 [CHECKOUT SESSION] About to call yuno_get_or_create_customer', [
+        'order_id' => $order->get_id(),
+    ]);
+
+    $customer_id = yuno_get_or_create_customer($order);
+
+    yuno_log('info', '🔵 [CHECKOUT SESSION] Customer function returned', [
+        'order_id'    => $order->get_id(),
+        'customer_id' => $customer_id ?: 'NULL',
+    ]);
+
     $payload = [
         'account_id'         => $accountId,
         'merchant_order_id'  => 'WC-' . $order->get_id(),
@@ -305,6 +333,26 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
             'value'    => $amount_value,   // major units
         ],
     ];
+
+    // ✅ Add customer_id if customer was created successfully
+    if (!empty($customer_id)) {
+        // According to Yuno API spec, customer_id is a direct string field, not a nested object
+        $payload['customer_id'] = $customer_id;
+        yuno_log('info', '✅ [CHECKOUT SESSION] Using customer_id', [
+            'order_id'    => $order->get_id(),
+            'customer_id' => $customer_id,
+        ]);
+    } else {
+        yuno_log('warning', '🔴 [CHECKOUT SESSION] Creating WITHOUT customer_id (fallback mode)', [
+            'order_id' => $order->get_id(),
+        ]);
+    }
+
+    yuno_log('info', '🔵 [CHECKOUT SESSION] Final payload before API call', [
+        'order_id'        => $order->get_id(),
+        'has_customer_id' => isset($payload['customer_id']) ? 'YES' : 'NO',
+        'payload'         => $payload,
+    ]);
 
     $res = yuno_wp_remote_json(
         'POST',
@@ -349,6 +397,343 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         'order_id'         => $order->get_id(),
         'reused'           => false,
     ], 200);
+}
+
+/**
+ * Format phone number for Yuno Customer API
+ *
+ * Returns phone as an object with country_code and number separated,
+ * as required by Yuno Customer API specification.
+ *
+ * @param string $phone Raw phone number from WooCommerce
+ * @param string $country ISO 3166-1 alpha-2 country code (e.g., 'CO', 'MX', 'US')
+ * @return array|null Array with 'country_code' and 'number' keys, or null if invalid
+ */
+function yuno_format_phone_number($phone, $country) {
+    // Remove all whitespace and special characters except + and digits
+    $cleaned = preg_replace('/[^\d+]/', '', $phone);
+
+    // If empty after cleaning, return null
+    if (empty($cleaned)) {
+        return null;
+    }
+
+    // Country code mapping with minimum length requirements
+    $country_codes = [
+        'CO' => ['code' => '57', 'min_length' => 10],  // Colombia: 10 digits
+        'MX' => ['code' => '52', 'min_length' => 10],  // Mexico: 10 digits
+        'BR' => ['code' => '55', 'min_length' => 10],  // Brazil: 10-11 digits
+        'AR' => ['code' => '54', 'min_length' => 10],  // Argentina: 10 digits
+        'CL' => ['code' => '56', 'min_length' => 9],   // Chile: 9 digits
+        'PE' => ['code' => '51', 'min_length' => 9],   // Peru: 9 digits
+        'US' => ['code' => '1',  'min_length' => 10],  // United States: 10 digits
+        'CA' => ['code' => '1',  'min_length' => 10],  // Canada: 10 digits
+        'ES' => ['code' => '34', 'min_length' => 9],   // Spain: 9 digits
+        'GB' => ['code' => '44', 'min_length' => 10],  // United Kingdom: 10 digits
+    ];
+
+    // Get country code configuration
+    $country_config = isset($country_codes[$country]) ? $country_codes[$country] : null;
+
+    // If we don't have a country code mapping, return null (fail gracefully)
+    if (!$country_config) {
+        yuno_log('warning', '🔴 [PHONE] Country code not mapped', [
+            'country' => $country,
+            'phone'   => $phone,
+        ]);
+        return null;
+    }
+
+    // If phone starts with +, extract country code and number
+    if (strpos($cleaned, '+') === 0) {
+        // Remove the + prefix
+        $cleaned = substr($cleaned, 1);
+
+        // Extract country code by matching against our mapping
+        $country_code_prefix = $country_config['code'];
+        if (strpos($cleaned, $country_code_prefix) === 0) {
+            $number = substr($cleaned, strlen($country_code_prefix));
+
+            // Validate minimum length
+            if (strlen($number) < $country_config['min_length']) {
+                yuno_log('warning', '🔴 [PHONE] Phone number too short after extracting country code', [
+                    'country'      => $country,
+                    'phone'        => $phone,
+                    'number'       => $number,
+                    'length'       => strlen($number),
+                    'min_required' => $country_config['min_length'],
+                ]);
+                return null;
+            }
+
+            $result = [
+                'country_code' => $country_code_prefix,
+                'number'       => $number,
+            ];
+
+            yuno_log('info', '✅ [PHONE] Formatted phone from international format', [
+                'original'     => $phone,
+                'country'      => $country,
+                'country_code' => $result['country_code'],
+                'number'       => $result['number'],
+            ]);
+
+            return $result;
+        }
+    }
+
+    // Validate minimum length for local number
+    if (strlen($cleaned) < $country_config['min_length']) {
+        yuno_log('warning', '🔴 [PHONE] Phone number too short', [
+            'country'      => $country,
+            'phone'        => $phone,
+            'length'       => strlen($cleaned),
+            'min_required' => $country_config['min_length'],
+        ]);
+        return null;
+    }
+
+    // Build phone object with country code and number
+    $result = [
+        'country_code' => $country_config['code'],
+        'number'       => $cleaned,
+    ];
+
+    yuno_log('info', '✅ [PHONE] Formatted phone number', [
+        'original'     => $phone,
+        'country'      => $country,
+        'country_code' => $result['country_code'],
+        'number'       => $result['number'],
+    ]);
+
+    return $result;
+}
+
+/**
+ * Get or create a Yuno Customer for a WooCommerce order
+ *
+ * Implements Yuno Customer management similar to VTEX integration.
+ * Stores customer_id in user_meta for reuse across orders.
+ *
+ * @param WC_Order $order The WooCommerce order
+ * @return string|null The Yuno customer_id or null on failure (graceful degradation)
+ */
+function yuno_get_or_create_customer($order) {
+    yuno_log('info', '🔵 [CUSTOMER] Function called', [
+        'order_id' => $order->get_id(),
+    ]);
+
+    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
+
+    if (empty($secretKey)) {
+        yuno_log('warning', '🔴 [CUSTOMER] missing PRIVATE_SECRET_KEY, skipping customer creation');
+        return null; // Graceful degradation - continues without customer
+    }
+
+    yuno_log('info', '🟢 [CUSTOMER] PRIVATE_SECRET_KEY found', [
+        'key_length' => strlen($secretKey),
+    ]);
+
+    $user_id = $order->get_user_id();
+    yuno_log('info', '🔵 [CUSTOMER] User ID check', [
+        'user_id'  => $user_id,
+        'is_guest' => empty($user_id) ? 'YES' : 'NO',
+    ]);
+
+    // Check if we already have a customer_id for this registered user
+    if ($user_id) {
+        $existing_customer_id = get_user_meta($user_id, '_yuno_customer_id', true);
+        yuno_log('info', '🔵 [CUSTOMER] Checking for existing customer', [
+            'user_id'              => $user_id,
+            'existing_customer_id' => $existing_customer_id ?: 'NOT FOUND',
+        ]);
+        if (!empty($existing_customer_id)) {
+            yuno_log('info', '✅ [CUSTOMER] REUSING existing customer', [
+                'user_id'     => $user_id,
+                'customer_id' => $existing_customer_id,
+            ]);
+
+            // ✅ FIX: Save to order meta even when reusing (needed for payment API customer_payer)
+            // Without this, payment creation fails with INVALID_CUSTOMER_FOR_TOKEN
+            $order->update_meta_data('_yuno_customer_id', $existing_customer_id);
+            $order->save();
+
+            return $existing_customer_id;
+        }
+    }
+
+    // Build customer payload from order data
+    $billing_first  = $order->get_billing_first_name();
+    $billing_last   = $order->get_billing_last_name();
+    $billing_email  = $order->get_billing_email();
+    $billing_phone  = $order->get_billing_phone();
+
+    $billing_country  = $order->get_billing_country();
+    $billing_state    = $order->get_billing_state();
+    $billing_city     = $order->get_billing_city();
+    $billing_postcode = $order->get_billing_postcode();
+    $billing_address1 = $order->get_billing_address_1();
+    $billing_address2 = $order->get_billing_address_2();
+
+    // Use shipping address if available, fallback to billing
+    $shipping_country  = $order->get_shipping_country() ?: $billing_country;
+    $shipping_state    = $order->get_shipping_state() ?: $billing_state;
+    $shipping_city     = $order->get_shipping_city() ?: $billing_city;
+    $shipping_postcode = $order->get_shipping_postcode() ?: $billing_postcode;
+    $shipping_address1 = $order->get_shipping_address_1() ?: $billing_address1;
+    $shipping_address2 = $order->get_shipping_address_2() ?: $billing_address2;
+
+    // Build merchant_customer_id (stable identifier for this customer)
+    $merchant_customer_id = $user_id
+        ? 'woo_user_' . $user_id
+        : 'woo_guest_order_' . $order->get_id();
+
+    // Build payload according to Yuno Customer API specification
+    $payload = [
+        'email'                => $billing_email,
+        'merchant_customer_id' => $merchant_customer_id,
+    ];
+
+    // Add first_name and last_name (separate fields, not combined "name")
+    if (!empty($billing_first)) {
+        $payload['first_name'] = $billing_first;
+    }
+    if (!empty($billing_last)) {
+        $payload['last_name'] = $billing_last;
+    }
+
+    // Add country at customer level (customer's country)
+    if (!empty($billing_country)) {
+        $payload['country'] = $billing_country;
+    }
+
+    // Add merchant_customer_created_at for registered users
+    if ($user_id) {
+        $user_data = get_userdata($user_id);
+        if ($user_data && !empty($user_data->user_registered)) {
+            // Convert WordPress registration date to ISO 8601 format
+            $registered_date = new DateTime($user_data->user_registered);
+            $payload['merchant_customer_created_at'] = $registered_date->format('c');
+        }
+    }
+
+    // Add phone if available (formatted as object with country_code and number)
+    if (!empty($billing_phone)) {
+        // Format phone according to Yuno Customer API spec
+        $formatted_phone = yuno_format_phone_number($billing_phone, $billing_country);
+        if (!empty($formatted_phone) && is_array($formatted_phone)) {
+            // Yuno expects phone as object: {"country_code": "57", "number": "3124598632"}
+            $payload['phone'] = $formatted_phone;
+        }
+    }
+
+    // Add billing address if data available (using Yuno API field names)
+    $billing_address = [];
+    if (!empty($billing_country)) $billing_address['country'] = $billing_country;
+    if (!empty($billing_state)) $billing_address['state'] = $billing_state;
+    if (!empty($billing_city)) $billing_address['city'] = $billing_city;
+    if (!empty($billing_postcode)) $billing_address['zip_code'] = $billing_postcode; // Changed from postal_code
+    if (!empty($billing_address1)) $billing_address['address_line_1'] = $billing_address1; // Changed from line1
+    if (!empty($billing_address2)) $billing_address['address_line_2'] = $billing_address2; // Changed from line2
+
+    if (!empty($billing_address)) {
+        $payload['billing_address'] = $billing_address;
+    }
+
+    // Add shipping address if data available (using Yuno API field names)
+    $shipping_address = [];
+    if (!empty($shipping_country)) $shipping_address['country'] = $shipping_country;
+    if (!empty($shipping_state)) $shipping_address['state'] = $shipping_state;
+    if (!empty($shipping_city)) $shipping_address['city'] = $shipping_city;
+    if (!empty($shipping_postcode)) $shipping_address['zip_code'] = $shipping_postcode; // Changed from postal_code
+    if (!empty($shipping_address1)) $shipping_address['address_line_1'] = $shipping_address1; // Changed from line1
+    if (!empty($shipping_address2)) $shipping_address['address_line_2'] = $shipping_address2; // Changed from line2
+
+    if (!empty($shipping_address)) {
+        $payload['shipping_address'] = $shipping_address;
+    }
+
+    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+    $apiUrl = yuno_api_url_from_public_key($publicKey);
+
+    yuno_log('info', '🔵 [CUSTOMER] Creating new customer', [
+        'order_id'             => $order->get_id(),
+        'merchant_customer_id' => $merchant_customer_id,
+        'email'                => $billing_email,
+        'api_url'              => $apiUrl,
+        'payload'              => $payload, // Log complete payload for debugging
+    ]);
+
+    // Call Yuno Create Customer API
+    $res = yuno_wp_remote_json(
+        'POST',
+        "{$apiUrl}/v1/customers",
+        [
+            'public-api-key'     => $publicKey,
+            'private-secret-key' => $secretKey,
+            'Content-Type'       => 'application/json',
+        ],
+        $payload,
+        20
+    );
+
+    yuno_log('info', '🔵 [CUSTOMER] API response received', [
+        'order_id' => $order->get_id(),
+        'ok'       => $res['ok'] ? 'TRUE' : 'FALSE',
+        'status'   => $res['status'] ?? 'N/A',
+        'response' => $res['raw'], // Log complete response
+    ]);
+
+    if (!$res['ok']) {
+        yuno_log('warning', '🔴 [CUSTOMER] API call failed, continuing without customer', [
+            'order_id' => $order->get_id(),
+            'status'   => $res['status'],
+            'response' => $res['raw'],
+        ]);
+        return null; // Graceful degradation - continues without customer
+    }
+
+    $customer_id = is_array($res['raw']) ? ($res['raw']['id'] ?? null) : null;
+
+    yuno_log('info', '🔵 [CUSTOMER] Extracting customer_id from response', [
+        'order_id'    => $order->get_id(),
+        'customer_id' => $customer_id ?: 'NOT FOUND',
+        'raw_type'    => gettype($res['raw']),
+    ]);
+
+    if (empty($customer_id)) {
+        yuno_log('warning', '🔴 [CUSTOMER] Missing id in response, continuing without customer', [
+            'order_id' => $order->get_id(),
+            'response' => $res['raw'],
+        ]);
+        return null; // Graceful degradation
+    }
+
+    yuno_log('info', '✅ [CUSTOMER] Customer created successfully', [
+        'order_id'    => $order->get_id(),
+        'customer_id' => $customer_id,
+        'user_id'     => $user_id ?: 'GUEST',
+    ]);
+
+    // Save customer_id to user meta for registered users (for reuse)
+    if ($user_id) {
+        update_user_meta($user_id, '_yuno_customer_id', $customer_id);
+        yuno_log('info', '✅ [CUSTOMER] Saved to user_meta', [
+            'user_id'     => $user_id,
+            'customer_id' => $customer_id,
+        ]);
+    }
+
+    // Also save to order meta for reference
+    $order->update_meta_data('_yuno_customer_id', $customer_id);
+    $order->save();
+
+    yuno_log('info', '✅ [CUSTOMER] Returning customer_id', [
+        'order_id'    => $order->get_id(),
+        'customer_id' => $customer_id,
+    ]);
+
+    return $customer_id;
 }
 
 function yuno_create_payment(WP_REST_Request $request) {
@@ -484,6 +869,22 @@ function yuno_create_payment(WP_REST_Request $request) {
             'vaulted_token' => null,
         ],
     ];
+
+    // Add customer_payer if customer was created (read from order meta)
+    $customer_id = $order->get_meta('_yuno_customer_id');
+    if (!empty($customer_id)) {
+        $payload['customer_payer'] = [
+            'id' => $customer_id,
+        ];
+        yuno_log('info', 'Payment: using customer_payer from order meta', [
+            'order_id'    => $order->get_id(),
+            'customer_id' => $customer_id,
+        ]);
+    } else {
+        yuno_log('warning', 'Payment: no customer_id found in order meta (creating payment without customer_payer)', [
+            'order_id' => $order->get_id(),
+        ]);
+    }
 
     // Split payload (major units)
     if ($split_enabled) {
