@@ -383,80 +383,8 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
         'status'   => $order_status,
       ]);
 
-      // Show minimal loader with instant redirect
-      // This provides better UX than showing the full payment page and then redirecting
-      $redirect_url = esc_url($order->get_checkout_order_received_url());
-      ?>
-      <!DOCTYPE html>
-      <html <?php language_attributes(); ?>>
-      <head>
-        <meta charset="<?php bloginfo('charset'); ?>">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta http-equiv="refresh" content="0;url=<?php echo $redirect_url; ?>">
-        <title><?php echo esc_html__('Redirecting...', 'yuno'); ?></title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background: #f7f7f7;
-            color: #333;
-          }
-          .redirect-container {
-            text-align: center;
-            padding: 40px 20px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            max-width: 400px;
-          }
-          .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #000;
-            border-radius: 50%;
-            width: 48px;
-            height: 48px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 24px;
-          }
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-          h2 {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #000;
-          }
-          p {
-            font-size: 14px;
-            color: #666;
-            line-height: 1.5;
-          }
-          .success-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-          }
-        </style>
-        <script>
-          // Immediate redirect (faster than meta refresh)
-          window.location.href = <?php echo wp_json_encode($redirect_url); ?>;
-        </script>
-      </head>
-      <body>
-        <div class="redirect-container">
-          <div class="success-icon">✓</div>
-          <h2><?php echo esc_html__('Payment Successful!', 'yuno'); ?></h2>
-          <p><?php echo esc_html__('Redirecting to your order confirmation...', 'yuno'); ?></p>
-          <div class="spinner"></div>
-        </div>
-      </body>
-      </html>
-      <?php
+      // Direct redirect without showing any loading screen
+      wp_safe_redirect($order->get_checkout_order_received_url());
       exit;
     }
 
@@ -471,29 +399,40 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $payment_method_title = $this->get_title();
 
     echo '<div class="yuno-receipt">';
-    echo '<h2 class="yuno-page-title">' . esc_html__('Complete your payment', 'yuno') . '</h2>';
+    echo '<h2 class="yuno-page-title">' . esc_html__('Yuno-SDK plugin', 'yuno') . '</h2>';
     echo '<div class="yuno-order-summary">';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Order', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Order:', 'yuno') . '</span>';
     echo '<span class="yuno-order-value" id="yuno-order-number">#' . esc_html($order_number) . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Date', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Date:', 'yuno') . '</span>';
     echo '<span class="yuno-order-value">' . esc_html($order_date) . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Total', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Total:', 'yuno') . '</span>';
     echo '<span class="yuno-order-value yuno-order-total" id="yuno-order-total">' . $total_html . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Payment Method', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Payment Method:', 'yuno') . '</span>';
     echo '<span class="yuno-order-value">' . esc_html($payment_method_title) . '</span>';
     echo '</div>';
 
+    echo '</div>';
+
+    echo '<div class="yuno-payment-info">';
+    echo '<h3 class="yuno-payment-title">' . esc_html__('Pay with Yuno', 'yuno') . '</h3>';
+    echo '<p class="yuno-payment-subtitle">' .
+         sprintf(
+           esc_html__('Order #%s - Total: %s', 'yuno'),
+           esc_html($order_number),
+           strip_tags($total_html)
+         ) .
+         '</p>';
     echo '</div>';
 
     echo '<div id="yuno-loader" class="yuno-loader" style="display:none;">' . esc_html__('Loading payment…', 'yuno') . '</div>';

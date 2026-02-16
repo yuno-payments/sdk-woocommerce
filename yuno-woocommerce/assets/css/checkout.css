@@ -13,7 +13,7 @@
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
-  padding: 20px 16px;
+  padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   line-height: 1.5;
   box-sizing: border-box;
@@ -22,36 +22,31 @@
 @media (min-width: 768px) {
   .yuno-receipt {
     max-width: 800px;
-    padding: 32px 24px;
+    padding: 0;
   }
 }
 
 /* ===== PAGE TITLE ===== */
 .yuno-page-title {
-  font-size: 24px !important;
-  font-weight: 600 !important;
-  color: #1a1a1a !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  color: #282A30 !important;
   margin: 0 0 24px 0 !important;
   padding: 0 !important;
-  line-height: 1.2 !important;
-  text-align: center !important;
-}
-
-@media (min-width: 768px) {
-  .yuno-page-title {
-    font-size: 28px !important;
-    margin: 0 0 32px 0 !important;
-  }
+  line-height: 24px !important;
+  letter-spacing: 0 !important;
+  text-align: left !important;
+  vertical-align: middle !important;
 }
 
 /* ===== ORDER SUMMARY CONTAINER ===== */
 .yuno-order-summary {
   display: grid;
   gap: 20px;
-  padding: 20px;
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  border-bottom: 1px solid #e9ecef;
   margin-bottom: 24px;
   box-sizing: border-box;
 }
@@ -61,7 +56,7 @@
   .yuno-order-summary {
     grid-template-columns: 1fr;
     gap: 16px;
-    padding: 16px;
+    padding: 0;
   }
 }
 
@@ -89,7 +84,7 @@
   }
 
   .yuno-order-item:first-child {
-    padding-left: 20px;
+    padding-left: 0;
   }
 
   .yuno-order-item:last-child {
@@ -107,43 +102,63 @@
 
 /* Label (uppercase, small, gray) */
 .yuno-order-label {
-  font-size: 11px !important;
-  font-weight: 600 !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 10px !important;
+  font-weight: 400 !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
-  color: #6c757d !important;
+  letter-spacing: 0 !important;
+  color: #6C6F75 !important;
   margin: 0 !important;
   padding: 0 !important;
-  line-height: 1.2 !important;
+  line-height: 16px !important;
+  vertical-align: middle !important;
 }
 
 /* Value (larger, bold, dark) */
 .yuno-order-value {
-  font-size: 16px !important;
-  font-weight: 600 !important;
-  color: #1a1a1a !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  color: #282A30 !important;
   margin: 0 !important;
   padding: 0 !important;
-  line-height: 1.3 !important;
+  line-height: 20px !important;
+  letter-spacing: 0 !important;
   word-break: break-word; /* Prevent overflow */
 }
 
-@media (min-width: 768px) {
-  .yuno-order-value {
-    font-size: 18px !important;
-  }
-}
-
-/* Total: emphasize with color */
+/* Total: keep same style as other values */
 .yuno-order-total {
-  color: #000000 !important;
-  font-size: 18px !important;
+  /* Inherits all styles from .yuno-order-value */
 }
 
-@media (min-width: 768px) {
-  .yuno-order-total {
-    font-size: 20px !important;
-  }
+/* ===== PAYMENT INFO ===== */
+.yuno-payment-info {
+  text-align: left;
+  margin: 50px 0 30px 0;
+}
+
+.yuno-payment-title {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  color: #282A30 !important;
+  margin: 0 0 8px 0 !important;
+  padding: 0 !important;
+  line-height: 20px !important;
+  letter-spacing: 0 !important;
+}
+
+.yuno-payment-subtitle {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: #282A30 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 16px !important;
+  letter-spacing: 0 !important;
+  text-align: left !important;
 }
 
 /* ===== LOADER ===== */
@@ -160,17 +175,21 @@
 /* ===== PAY BUTTON ===== */
 .yuno-pay-button {
   width: 100% !important;
-  margin: 24px 0 0 0 !important;
+  margin: 32px 0 0 0 !important;
   padding: 16px 24px !important;
-  background-color: #000000 !important;
+  background-color: #282A30 !important;
   color: #ffffff !important;
   border: none !important;
   border-radius: 8px !important;
-  font-size: 16px !important;
-  font-weight: 600 !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 18px !important;
+  font-weight: 400 !important;
+  line-height: 24px !important;
+  letter-spacing: 0 !important;
+  text-align: center !important;
+  vertical-align: middle !important;
   cursor: pointer !important;
   transition: background-color 0.2s ease, opacity 0.2s ease !important;
-  text-align: center !important;
   box-sizing: border-box !important;
 }
 

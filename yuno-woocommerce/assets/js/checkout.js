@@ -574,16 +574,7 @@ async function startYunoCheckout() {
               if (confirmRes.redirect) {
                 console.log("[YUNO] Payment confirmed, redirecting to order-received...");
 
-                // Update loader message to indicate success
-                const loaderText = document.querySelector('div[style*="font-size: 18px"]');
-                if (loaderText) {
-                  loaderText.textContent = 'Payment Successful!';
-                }
-                const loaderSubtext = document.querySelector('div[style*="font-size: 14px"]');
-                if (loaderSubtext) {
-                  loaderSubtext.textContent = 'Redirecting to your order confirmation...';
-                }
-
+                // Immediate redirect without showing success message
                 window.location.href = confirmRes.redirect;
                 return;
               }
