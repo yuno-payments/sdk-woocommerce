@@ -492,6 +492,7 @@ async function startYunoCheckout() {
           <div id="yuno-checkout"></div>
         `;
 
+        let paymentRes; // Declare outside try-catch to access in finally block
         try {
           const payload = {
             oneTimeToken,
@@ -505,7 +506,7 @@ async function startYunoCheckout() {
 
           console.log("[YUNO] Creating payment...");
 
-          const paymentRes = await createPayment(payload);
+          paymentRes = await createPayment(payload);
 
           console.log("[YUNO] /payments split response:", paymentRes?.split || "No split data");
 
@@ -518,6 +519,83 @@ async function startYunoCheckout() {
           state.lastPaymentId = paymentRes?.payment_id || paymentRes?.response?.id || null;
 
           console.log("[YUNO] createPayment ", paymentRes);
+
+          // ✅ Handle PENDING payments: Let SDK render, detect message, then redirect after user reads it
+          if (paymentRes?.response?.status === 'PENDING') {
+            console.log("[YUNO] Payment is PENDING, will wait for SDK to show message...");
+
+            // Function to check if SDK message is visible
+            const checkForSDKMessage = () => {
+              const sdkContainers = ['#yuno-root', '#yuno-apm-form', '#yuno-action-form', '#yuno-checkout'];
+              for (const selector of sdkContainers) {
+                const container = document.querySelector(selector);
+                if (container && container.textContent.includes('Transactions in progress')) {
+                  return true;
+                }
+              }
+              return false;
+            };
+
+            // Function to handle redirect after message is shown
+            const handlePendingRedirect = async () => {
+              console.log("[YUNO] PENDING payment - confirming status and redirecting...");
+
+              try {
+                const confirmRes = await confirmOrder({
+                  orderId: state.orderId,
+                  orderKey: state.orderKey,
+                  order_id: state.orderId,
+                  order_key: state.orderKey,
+                  paymentId: state.lastPaymentId,
+                  payment_id: state.lastPaymentId,
+                });
+
+                console.log("[YUNO] confirmOrder for PENDING payment:", confirmRes);
+
+                if (confirmRes?.redirect) {
+                  console.log("[YUNO] Redirecting to order-received:", confirmRes.redirect);
+                  window.location.href = confirmRes.redirect;
+                  return;
+                }
+
+                console.log("[YUNO] No redirect URL, reloading...");
+                window.location.reload();
+              } catch (e) {
+                console.error("[YUNO] Error confirming PENDING payment:", e);
+                window.location.reload();
+              }
+            };
+
+            // Wait for SDK to render (give it time after continuePayment is called)
+            setTimeout(() => {
+              console.log("[YUNO] Starting to check for SDK message...");
+
+              // Check for SDK message every 500ms, with max timeout of 15 seconds
+              let checkCount = 0;
+              const maxChecks = 30; // 30 checks * 500ms = 15 seconds max wait
+              const checkInterval = setInterval(() => {
+                checkCount++;
+
+                if (checkForSDKMessage()) {
+                  console.log("[YUNO] SDK message detected! Now waiting 5 seconds for user to read...");
+                  clearInterval(checkInterval);
+
+                  // NOW start counting: wait 5 seconds after message appears, then redirect
+                  setTimeout(handlePendingRedirect, 5000);
+                  return;
+                }
+
+                // Safety timeout: if message not found after 15 seconds, redirect anyway
+                if (checkCount >= maxChecks) {
+                  console.log("[YUNO] SDK message not detected after 15s, redirecting anyway (safety timeout)...");
+                  clearInterval(checkInterval);
+                  handlePendingRedirect();
+                }
+              }, 500);
+            }, 1000); // Wait 1 second for SDK to render before we start checking
+
+            // DON'T return - let continuePayment() be called in finally block
+          }
         } catch (e) {
           console.error("[YUNO]  createPayment failed", e);
           state.paying = false;
@@ -530,6 +608,8 @@ async function startYunoCheckout() {
 
           throw e;
         } finally {
+          // Always call continuePayment to let SDK render its UI
+          // For PENDING payments, we set up listeners above to detect the message and redirect
           yunoInstance.continuePayment();
         }
       },
@@ -631,12 +711,45 @@ async function startYunoCheckout() {
         }
       },
 
-      yunoError: (error) => {
+      yunoError: async (error) => {
         console.error("[YUNO]  yunoError", {
           error,
           selectedMethod: state.selectedPaymentMethod,
           timestamp: new Date().toISOString()
         });
+
+        // Handle 3DS modal cancellation (user closed modal without completing)
+        // When user closes 3DS modal, page is stuck on "Processing payment..." loader
+        // Solution: Create new order and redirect (same as payment failure flow)
+        if (error === 'CANCELED_BY_USER') {
+          console.log("[YUNO] User cancelled 3DS modal, creating new order...");
+
+          try {
+            const duplicateRes = await duplicateOrder({
+              orderId: state.orderId,
+              orderKey: state.orderKey,
+            });
+
+            if (duplicateRes?.ok && duplicateRes?.new_order_id) {
+              console.log("[YUNO] New order created after cancellation:", duplicateRes.new_order_id);
+
+              // Redirect to new order (will reload page and restore payment form)
+              await reinitializeWithNewOrder(
+                duplicateRes.new_order_id,
+                duplicateRes.new_order_key,
+                duplicateRes.formatted_total,
+                duplicateRes.pay_url
+              );
+              return;
+            }
+          } catch (e) {
+            console.error("[YUNO] Failed to create new order after cancellation", e);
+            // Fallback: reload page to restore payment form
+            console.log("[YUNO] Fallback: reloading page to restore payment form");
+            window.location.reload();
+            return;
+          }
+        }
 
         state.paying = false;
 
@@ -645,6 +758,42 @@ async function startYunoCheckout() {
         // If card fields are valid, user can retry immediately without modifying fields
         console.log("[YUNO]  Payment error, re-enabling button for retry");
         setPayButtonDisabled(false);
+      },
+
+      // Modal events: track 3DS and other modal interactions
+      yunoModalOpened: (data) => {
+        console.log("[YUNO] 🔵 MODAL OPENED", {
+          data,
+          type: data?.type || 'unknown',
+          reason: data?.reason || 'unknown',
+          timestamp: new Date().toISOString()
+        });
+      },
+
+      yunoModalClosed: (data) => {
+        console.log("[YUNO] 🔴 MODAL CLOSED", {
+          data,
+          type: data?.type || 'unknown',
+          reason: data?.reason || 'unknown',
+          userAction: data?.userAction || 'unknown',
+          timestamp: new Date().toISOString()
+        });
+
+        // Handle 3DS modal close without completion
+        // If user closes 3DS modal, reset payment state to allow retry
+        if (state.paying) {
+          console.log("[YUNO] ⚠️ Modal closed during payment - resetting state for retry");
+          state.paying = false;
+          setPayButtonDisabled(false);
+        }
+      },
+
+      // Loading state changes
+      yunoLoading: (isLoading) => {
+        console.log("[YUNO] 🔄 LOADING STATE", {
+          isLoading,
+          timestamp: new Date().toISOString()
+        });
       },
     });
 
