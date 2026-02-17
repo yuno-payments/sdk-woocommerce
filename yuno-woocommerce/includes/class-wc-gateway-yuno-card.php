@@ -5,8 +5,8 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
   public function __construct() {
     $this->id                 = 'yuno_card';
-    $this->method_title       = 'Card (Yuno)';
-    $this->method_description = 'Card payment using Yuno';
+    $this->method_title       = 'Yuno';
+    $this->method_description = 'Accept payments with Yuno - cards, wallets, and local payment methods';
 
     $this->has_fields = false;
     $this->supports = ['products'];
@@ -14,8 +14,8 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $this->init_form_fields();
     $this->init_settings();
 
-    $title = $this->get_option('title', 'Yuno Card');
-    $this->title = (is_string($title) && $title !== '') ? $title : 'Yuno Card';
+    $title = $this->get_option('title', 'Yuno');
+    $this->title = (is_string($title) && $title !== '') ? $title : 'Yuno';
 
     $enabled = $this->get_option('enabled', 'no');
     $this->enabled = ($enabled === 'yes') ? 'yes' : 'no';
@@ -33,7 +33,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
   public function get_title() {
     $t = isset($this->title) ? (string) $this->title : '';
-    return $t !== '' ? $t : 'Yuno Card';
+    return $t !== '' ? $t : 'Yuno';
   }
 
   /**

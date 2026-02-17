@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Yuno WooCommerce Gateway
- * Description: Yuno payment gateway integration for WooCommerce.
+ * Description: Accept payments with Yuno - cards, wallets, and local payment methods.
  * Version: 0.5.0
  */
 
