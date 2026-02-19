@@ -78,14 +78,6 @@ function yuno_wp_remote_json($method, $url, $headers = [], $body = null, $timeou
     $rawBody = wp_remote_retrieve_body($resp);
     $json    = json_decode($rawBody, true);
 
-    // Log Yuno HTTP response for debugging
-    yuno_log('debug', 'Yuno HTTP response', [
-        'method' => $method,
-        'url'    => $url,
-        'status' => $status,
-        'body'   => $json ?? $rawBody,
-    ]);
-
     return [
         'ok'     => ($status >= 200 && $status < 300),
         'status' => $status,
@@ -174,7 +166,6 @@ function yuno_get_order_from_request(WP_REST_Request $request) {
 }
 
 function yuno_build_idempotency_key($order_id, $checkout_session) {
-    // Get payment attempt count from order meta
     $order = wc_get_order($order_id);
     $attempt_count = 0;
 
@@ -264,6 +255,18 @@ add_action('rest_api_init', function () {
     ]);
 });
 
+/**
+ * Create a Yuno checkout session for a WooCommerce order
+ *
+ * This endpoint is called by the frontend to initialize the Yuno SDK.
+ * It creates a fresh checkout session for each request (never reuses sessions)
+ * to prevent INVALID_CUSTOMER_FOR_TOKEN errors.
+ *
+ * Also creates or retrieves a Yuno customer for the order using per-order strategy.
+ *
+ * @param WP_REST_Request $request Must include orderId and orderKey
+ * @return WP_REST_Response JSON with checkout_session, country, and customer_id
+ */
 function yuno_create_checkout_session(WP_REST_Request $request) {
     $accountId = yuno_get_env('ACCOUNT_ID', '');
     $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
@@ -283,7 +286,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ], 409);
     }
 
-    // ✅ FIX: ALWAYS create new checkout session (never reuse)
+    //FIX: ALWAYS create new checkout session (never reuse)
     // Reusing checkout sessions can cause INVALID_CUSTOMER_FOR_TOKEN errors when:
     // - customer_id in order meta doesn't match customer_id in old checkout session
     // - This happens after order duplication, customer changes, or retry scenarios
@@ -311,14 +314,14 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         'amount_value'  => $amount_value,
     ]);
 
-    // ✅ Try to get or create Yuno Customer (optional, graceful degradation)
-    yuno_log('info', '🔵 [CHECKOUT SESSION] About to call yuno_get_or_create_customer', [
+    //Try to get or create Yuno Customer (optional, graceful degradation)
+    yuno_log('info', '[CHECKOUT SESSION]About to call yuno_get_or_create_customer', [
         'order_id' => $order->get_id(),
     ]);
 
     $customer_id = yuno_get_or_create_customer($order);
 
-    yuno_log('info', '🔵 [CHECKOUT SESSION] Customer function returned', [
+    yuno_log('info', '[CHECKOUT SESSION]Customer function returned', [
         'order_id'    => $order->get_id(),
         'customer_id' => $customer_id ?: 'NULL',
     ]);
@@ -335,21 +338,21 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ],
     ];
 
-    // ✅ Add customer_id if customer was created successfully
+    //Add customer_id if customer was created successfully
     if (!empty($customer_id)) {
         // According to Yuno API spec, customer_id is a direct string field, not a nested object
         $payload['customer_id'] = $customer_id;
-        yuno_log('info', '✅ [CHECKOUT SESSION] Using customer_id', [
+        yuno_log('info', '[CHECKOUT SESSION]Using customer_id', [
             'order_id'    => $order->get_id(),
             'customer_id' => $customer_id,
         ]);
     } else {
-        yuno_log('warning', '🔴 [CHECKOUT SESSION] Creating WITHOUT customer_id (fallback mode)', [
+        yuno_log('warning', '[CHECKOUT SESSION]Creating WITHOUT customer_id (fallback mode)', [
             'order_id' => $order->get_id(),
         ]);
     }
 
-    // ✅ Add billing_address from order data (always send current data)
+    //Add billing_address from order data (always send current data)
     $billing_country  = $order->get_billing_country();
     $billing_state    = $order->get_billing_state();
     $billing_city     = $order->get_billing_city();
@@ -367,13 +370,13 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
 
     if (!empty($billing_address)) {
         $payload['billing_address'] = $billing_address;
-        yuno_log('info', '✅ [CHECKOUT SESSION] Including billing_address', [
+        yuno_log('info', '[CHECKOUT SESSION]Including billing_address', [
             'order_id' => $order->get_id(),
             'billing'  => $billing_address,
         ]);
     }
 
-    // ✅ Add shipping_address from order data (always send current data)
+    //Add shipping_address from order data (always send current data)
     $shipping_country  = $order->get_shipping_country() ?: $billing_country;
     $shipping_state    = $order->get_shipping_state() ?: $billing_state;
     $shipping_city     = $order->get_shipping_city() ?: $billing_city;
@@ -391,13 +394,13 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
 
     if (!empty($shipping_address)) {
         $payload['shipping_address'] = $shipping_address;
-        yuno_log('info', '✅ [CHECKOUT SESSION] Including shipping_address', [
+        yuno_log('info', '[CHECKOUT SESSION]Including shipping_address', [
             'order_id' => $order->get_id(),
             'shipping' => $shipping_address,
         ]);
     }
 
-    yuno_log('info', '🔵 [CHECKOUT SESSION] Final payload before API call', [
+    yuno_log('info', '[CHECKOUT SESSION]Final payload before API call', [
         'order_id'        => $order->get_id(),
         'has_customer_id' => isset($payload['customer_id']) ? 'YES' : 'NO',
         'payload'         => $payload,
@@ -416,13 +419,13 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
     );
 
     if (!$res['ok']) {
-        // ✅ Handle CUSTOMER_NOT_FOUND error (occurs when API keys are changed)
+        //Handle CUSTOMER_NOT_FOUND error (occurs when API keys are changed)
         // When merchant changes Yuno API keys to a different account, cached customer_ids
         // from the old account don't exist in the new account
         $error_code = is_array($res['raw']) ? ($res['raw']['code'] ?? '') : '';
 
         if ($error_code === 'CUSTOMER_NOT_FOUND' && !empty($customer_id)) {
-            yuno_log('warning', '🔴 [CHECKOUT SESSION] CUSTOMER_NOT_FOUND - clearing cached customer and retrying', [
+            yuno_log('warning', '[CHECKOUT SESSION]CUSTOMER_NOT_FOUND - clearing cached customer and retrying', [
                 'order_id'            => $order->get_id(),
                 'old_customer_id'     => $customer_id,
                 'user_id'             => $order->get_user_id(),
@@ -432,7 +435,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
             $user_id = $order->get_user_id();
             if ($user_id) {
                 delete_user_meta($user_id, '_yuno_customer_id');
-                yuno_log('info', '✅ [CHECKOUT SESSION] Cleared cached customer_id for user', [
+                yuno_log('info', '[CHECKOUT SESSION]Cleared cached customer_id for user', [
                     'user_id' => $user_id,
                 ]);
             }
@@ -442,7 +445,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
             $order->save();
 
             // Retry customer creation (will create a new customer in the new account)
-            yuno_log('info', '🔄 [CHECKOUT SESSION] Retrying customer creation', [
+            yuno_log('info', '[CHECKOUT SESSION]Retrying customer creation', [
                 'order_id' => $order->get_id(),
             ]);
 
@@ -452,7 +455,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
                 // Update payload with new customer_id
                 $payload['customer_id'] = $new_customer_id;
 
-                yuno_log('info', '✅ [CHECKOUT SESSION] Created new customer, retrying checkout session', [
+                yuno_log('info', '[CHECKOUT SESSION]Created new customer, retrying checkout session', [
                     'order_id'         => $order->get_id(),
                     'new_customer_id'  => $new_customer_id,
                 ]);
@@ -472,7 +475,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
 
                 // If retry also fails, return the error below
                 if (!$res['ok']) {
-                    yuno_log('error', '🔴 [CHECKOUT SESSION] Retry failed after customer recreation', [
+                    yuno_log('error', '[CHECKOUT SESSION]Retry failed after customer recreation', [
                         'order_id' => $order->get_id(),
                         'status'   => $res['status'],
                         'response' => $res['raw'],
@@ -486,11 +489,11 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
                 }
 
                 // Retry succeeded, continue with normal flow below
-                yuno_log('info', '✅ [CHECKOUT SESSION] Retry succeeded', [
+                yuno_log('info', '[CHECKOUT SESSION]Retry succeeded', [
                     'order_id' => $order->get_id(),
                 ]);
             } else {
-                yuno_log('error', '🔴 [CHECKOUT SESSION] Failed to create new customer on retry', [
+                yuno_log('error', '[CHECKOUT SESSION] Failed to create new customer on retry', [
                     'order_id' => $order->get_id(),
                 ]);
 
@@ -568,12 +571,11 @@ function yuno_format_phone_number($phone, $country) {
         'GB' => ['code' => '44', 'min_length' => 10],  // United Kingdom: 10 digits
     ];
 
-    // Get country code configuration
     $country_config = isset($country_codes[$country]) ? $country_codes[$country] : null;
 
     // If we don't have a country code mapping, return null (fail gracefully)
     if (!$country_config) {
-        yuno_log('warning', '🔴 [PHONE] Country code not mapped', [
+        yuno_log('warning', '[PHONE]Country code not mapped', [
             'country' => $country,
             'phone'   => $phone,
         ]);
@@ -582,7 +584,6 @@ function yuno_format_phone_number($phone, $country) {
 
     // If phone starts with +, extract country code and number
     if (strpos($cleaned, '+') === 0) {
-        // Remove the + prefix
         $cleaned = substr($cleaned, 1);
 
         // Extract country code by matching against our mapping
@@ -590,9 +591,8 @@ function yuno_format_phone_number($phone, $country) {
         if (strpos($cleaned, $country_code_prefix) === 0) {
             $number = substr($cleaned, strlen($country_code_prefix));
 
-            // Validate minimum length
             if (strlen($number) < $country_config['min_length']) {
-                yuno_log('warning', '🔴 [PHONE] Phone number too short after extracting country code', [
+                yuno_log('warning', '[PHONE]Phone number too short after extracting country code', [
                     'country'      => $country,
                     'phone'        => $phone,
                     'number'       => $number,
@@ -607,7 +607,7 @@ function yuno_format_phone_number($phone, $country) {
                 'number'       => $number,
             ];
 
-            yuno_log('info', '✅ [PHONE] Formatted phone from international format', [
+            yuno_log('info', '[PHONE]Formatted phone from international format', [
                 'original'     => $phone,
                 'country'      => $country,
                 'country_code' => $result['country_code'],
@@ -620,7 +620,7 @@ function yuno_format_phone_number($phone, $country) {
 
     // Validate minimum length for local number
     if (strlen($cleaned) < $country_config['min_length']) {
-        yuno_log('warning', '🔴 [PHONE] Phone number too short', [
+        yuno_log('warning', '[PHONE]Phone number too short', [
             'country'      => $country,
             'phone'        => $phone,
             'length'       => strlen($cleaned),
@@ -635,7 +635,7 @@ function yuno_format_phone_number($phone, $country) {
         'number'       => $cleaned,
     ];
 
-    yuno_log('info', '✅ [PHONE] Formatted phone number', [
+    yuno_log('info', '[PHONE]Formatted phone number', [
         'original'     => $phone,
         'country'      => $country,
         'country_code' => $result['country_code'],
@@ -656,14 +656,14 @@ function yuno_format_phone_number($phone, $country) {
  * @return string|null The Yuno customer_id or null on failure (graceful degradation)
  */
 function yuno_get_or_create_customer($order) {
-    yuno_log('info', '🔵 [CUSTOMER] Function called', [
+    yuno_log('info', '[CUSTOMER]Function called', [
         'order_id' => $order->get_id(),
     ]);
 
-    // ✅ Check if customer already created for THIS order (reuse within same order)
+    //Check if customer already created for THIS order (reuse within same order)
     $existing_customer_id = $order->get_meta('_yuno_customer_id');
     if (!empty($existing_customer_id)) {
-        yuno_log('info', '✅ [CUSTOMER] Reusing existing customer_id from order meta', [
+        yuno_log('info', '[CUSTOMER]Reusing existing customer_id from order meta', [
             'order_id'    => $order->get_id(),
             'customer_id' => $existing_customer_id,
         ]);
@@ -673,16 +673,16 @@ function yuno_get_or_create_customer($order) {
     $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
     if (empty($secretKey)) {
-        yuno_log('warning', '🔴 [CUSTOMER] missing PRIVATE_SECRET_KEY, skipping customer creation');
+        yuno_log('warning', '[CUSTOMER]missing PRIVATE_SECRET_KEY, skipping customer creation');
         return null; // Graceful degradation - continues without customer
     }
 
-    yuno_log('info', '🟢 [CUSTOMER] PRIVATE_SECRET_KEY found', [
+    yuno_log('info', '[CUSTOMER]PRIVATE_SECRET_KEY found', [
         'key_length' => strlen($secretKey),
     ]);
 
     $user_id = $order->get_user_id();
-    yuno_log('info', '🔵 [CUSTOMER] User ID check', [
+    yuno_log('info', '[CUSTOMER]User ID check', [
         'user_id'  => $user_id,
         'is_guest' => empty($user_id) ? 'YES' : 'NO',
     ]);
@@ -708,7 +708,7 @@ function yuno_get_or_create_customer($order) {
     $shipping_address1 = $order->get_shipping_address_1() ?: $billing_address1;
     $shipping_address2 = $order->get_shipping_address_2() ?: $billing_address2;
 
-    // ✅ Option A: Always use order ID for merchant_customer_id (unique per order, never reuse)
+    //Option A: Always use order ID for merchant_customer_id (unique per order, never reuse)
     $merchant_customer_id = 'woo_order_' . $order->get_id();
 
     // Build payload according to Yuno Customer API specification
@@ -725,7 +725,6 @@ function yuno_get_or_create_customer($order) {
         $payload['last_name'] = $billing_last;
     }
 
-    // Add country at customer level (customer's country)
     if (!empty($billing_country)) {
         $payload['country'] = $billing_country;
     }
@@ -750,7 +749,6 @@ function yuno_get_or_create_customer($order) {
         }
     }
 
-    // Add billing address if data available (using Yuno API field names)
     $billing_address = [];
     if (!empty($billing_country)) $billing_address['country'] = $billing_country;
     if (!empty($billing_state)) $billing_address['state'] = $billing_state;
@@ -763,7 +761,6 @@ function yuno_get_or_create_customer($order) {
         $payload['billing_address'] = $billing_address;
     }
 
-    // Add shipping address if data available (using Yuno API field names)
     $shipping_address = [];
     if (!empty($shipping_country)) $shipping_address['country'] = $shipping_country;
     if (!empty($shipping_state)) $shipping_address['state'] = $shipping_state;
@@ -779,8 +776,8 @@ function yuno_get_or_create_customer($order) {
     $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
     $apiUrl = yuno_api_url_from_public_key($publicKey);
 
-    // ✅ Always CREATE new customer (no reuse, no update logic)
-    yuno_log('info', '🔵 [CUSTOMER] Creating new customer (always fresh per order)', [
+    //Always CREATE new customer (no reuse, no update logic)
+    yuno_log('info', '[CUSTOMER]Creating new customer (always fresh per order)', [
         'order_id'             => $order->get_id(),
         'merchant_customer_id' => $merchant_customer_id,
         'email'                => $billing_email,
@@ -801,7 +798,7 @@ function yuno_get_or_create_customer($order) {
         20
     );
 
-    yuno_log('info', '🔵 [CUSTOMER] API response received', [
+    yuno_log('info', '[CUSTOMER]API response received', [
         'order_id' => $order->get_id(),
         'ok'       => $res['ok'] ? 'TRUE' : 'FALSE',
         'status'   => $res['status'] ?? 'N/A',
@@ -809,7 +806,7 @@ function yuno_get_or_create_customer($order) {
     ]);
 
     if (!$res['ok']) {
-        yuno_log('warning', '🔴 [CUSTOMER] API call failed, continuing without customer', [
+        yuno_log('warning', '[CUSTOMER]API call failed, continuing without customer', [
             'order_id'  => $order->get_id(),
             'status'    => $res['status'],
             'response'  => $res['raw'],
@@ -819,21 +816,21 @@ function yuno_get_or_create_customer($order) {
 
     $customer_id = is_array($res['raw']) ? ($res['raw']['id'] ?? null) : null;
 
-    yuno_log('info', '🔵 [CUSTOMER] Extracting customer_id from response', [
+    yuno_log('info', '[CUSTOMER]Extracting customer_id from response', [
         'order_id'    => $order->get_id(),
         'customer_id' => $customer_id ?: 'NOT FOUND',
         'raw_type'    => gettype($res['raw']),
     ]);
 
     if (empty($customer_id)) {
-        yuno_log('warning', '🔴 [CUSTOMER] Missing id in response, continuing without customer', [
+        yuno_log('warning', '[CUSTOMER]Missing id in response, continuing without customer', [
             'order_id' => $order->get_id(),
             'response' => $res['raw'],
         ]);
         return null; // Graceful degradation
     }
 
-    yuno_log('info', '✅ [CUSTOMER] Customer created successfully', [
+    yuno_log('info', '[CUSTOMER] Customer created successfully', [
         'order_id'    => $order->get_id(),
         'customer_id' => $customer_id,
         'user_id'     => $user_id ?: 'GUEST',
@@ -843,7 +840,7 @@ function yuno_get_or_create_customer($order) {
     $order->update_meta_data('_yuno_customer_id', $customer_id);
     $order->save();
 
-    yuno_log('info', '✅ [CUSTOMER] Returning customer_id', [
+    yuno_log('info', '[CUSTOMER] Returning customer_id', [
         'order_id'    => $order->get_id(),
         'customer_id' => $customer_id,
     ]);
@@ -851,6 +848,16 @@ function yuno_get_or_create_customer($order) {
     return $customer_id;
 }
 
+/**
+ * Create a payment in Yuno using a oneTimeToken from the SDK
+ *
+ * Called by frontend after user enters payment details and SDK generates a token.
+ * Creates the payment in Yuno API with order details, customer, and optional split.
+ * Uses idempotency key to prevent duplicate payments on retry.
+ *
+ * @param WP_REST_Request $request Must include orderId, orderKey, oneTimeToken, and checkoutSession
+ * @return WP_REST_Response JSON with payment_id, status, and response from Yuno API
+ */
 function yuno_create_payment(WP_REST_Request $request) {
     $accountId = yuno_get_env('ACCOUNT_ID', '');
     $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
@@ -985,7 +992,7 @@ function yuno_create_payment(WP_REST_Request $request) {
         ],
     ];
 
-    // ✅ Get or create customer for this payment
+    //Get or create customer for this payment
     // This ensures customer always exists and is up-to-date, even for "order again" scenarios
     yuno_log('info', 'Payment: getting or creating customer', [
         'order_id' => $order->get_id(),
@@ -993,7 +1000,6 @@ function yuno_create_payment(WP_REST_Request $request) {
 
     $customer_id = yuno_get_or_create_customer($order);
 
-    // Add customer_payer if customer was created successfully
     if (!empty($customer_id)) {
         $payload['customer_payer'] = [
             'id' => $customer_id,
@@ -1035,15 +1041,6 @@ function yuno_create_payment(WP_REST_Request $request) {
     }
 
     // Log sanitized payload
-    $payload_for_log = $payload;
-    if (isset($payload_for_log['payment_method']['token'])) {
-        $payload_for_log['payment_method']['token'] = '[REDACTED]';
-    }
-    yuno_log('debug', 'payments payload (sanitized)', [
-        'order_id' => $order->get_id(),
-        'payload'  => $payload_for_log,
-    ]);
-
     $res = yuno_wp_remote_json(
         'POST',
         "{$apiUrl}/v1/payments",
@@ -1093,13 +1090,24 @@ function yuno_create_payment(WP_REST_Request $request) {
     ], 200);
 }
 
+/**
+ * Confirm and finalize a payment by verifying status with Yuno API
+ *
+ * Called by frontend after SDK payment flow completes (yunoPaymentResult callback).
+ * Performs server-side verification by querying Yuno API for payment status.
+ * Updates WooCommerce order status based on verified payment status.
+ * Handles PENDING payments (3DS) by not redirecting until webhook confirms.
+ *
+ * @param WP_REST_Request $request Must include orderId, orderKey, and payment_id
+ * @return WP_REST_Response JSON with order status, redirect URL, and payment details
+ */
 function yuno_confirm_order_payment(WP_REST_Request $request) {
     [$order, $err] = yuno_get_order_from_request($request);
     if ($err) return $err;
 
     $params = (array) $request->get_json_params();
 
-    // ✅ SECURITY: Server-side verification implemented
+    //SECURITY: Server-side verification implemented
     // Frontend only sends payment_id, backend verifies status with Yuno API
     $payment_id = $params['payment_id'] ?? $params['paymentId'] ?? $order->get_meta('_yuno_payment_id');
 
@@ -1125,7 +1133,6 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    // Get credentials
     $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
     $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
@@ -1138,7 +1145,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
 
     $apiUrl = yuno_api_url_from_public_key($publicKey);
 
-    // ✅ SERVER-SIDE VERIFICATION: Query Yuno for payment status
+    //SERVER-SIDE VERIFICATION: Query Yuno for payment status
     yuno_log('info', 'Confirm: verifying payment with Yuno', [
         'order_id'   => $order->get_id(),
         'payment_id' => $payment_id,
@@ -1174,7 +1181,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 500);
     }
 
-    // ✅ Source of truth: status verified by Yuno API
+    //Source of truth: status verified by Yuno API
     // Log FULL response for debugging
     yuno_log('info', 'Confirm: full Yuno response', [
         'order_id'      => $order->get_id(),
@@ -1185,7 +1192,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
     // Extract status from Yuno response
     $verified_status = yuno_extract_payment_status($res['raw']);
 
-    // ✅ SECURITY: Validate payment_id belongs to this order
+    //SECURITY: Validate payment_id belongs to this order
     // Prevent payment reuse attack where attacker uses a legitimate payment_id
     // from one order to mark a different order as paid
     $stored_payment_id = $order->get_meta('_yuno_payment_id');
@@ -1220,7 +1227,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
 
     // Handle verified status
     if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
-        // ✅ DEBUG: Log product types before payment_complete()
+        //DEBUG: Log product types before payment_complete()
         $order_items_debug = [];
         foreach ($order->get_items() as $item) {
             $product = $item->get_product();
@@ -1234,7 +1241,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
             }
         }
 
-        // ✅ DEBUG: Check if there are any filters affecting payment_complete status
+        //DEBUG: Check if there are any filters affecting payment_complete status
         global $wp_filter;
         $active_filters = [];
         if (isset($wp_filter['woocommerce_payment_complete_order_status'])) {
@@ -1255,13 +1262,13 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
 
         $order->payment_complete($payment_id);
 
-        // ✅ DEBUG: Check status immediately after payment_complete(), BEFORE save()
+        //DEBUG: Check status immediately after payment_complete(), BEFORE save()
         $status_after_payment_complete = $order->get_status();
 
         $order->add_order_note('Yuno payment approved (verified). status=' . $verified_status . ' payment_id=' . $payment_id);
         $order->save();
 
-        // ✅ DEBUG: Check status again after save()
+        //DEBUG: Check status again after save()
         $status_after_save = $order->get_status();
 
         yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete()', [
@@ -1302,7 +1309,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    // ✅ Intermediate states (PENDING, PROCESSING, REQUIRES_ACTION, etc.)
+    //Intermediate states (PENDING, PROCESSING, REQUIRES_ACTION, etc.)
     // Change order status to 'on-hold' to indicate payment is processing
     // WooCommerce status meanings:
     // - 'pending' = Waiting for payment (order created but no payment initiated)
@@ -1322,7 +1329,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         'order_status' => $order->get_status(),
     ]);
 
-    // ✅ For PENDING payments (3DS, etc.), DON'T redirect to order-received
+    //For PENDING payments (3DS, etc.), DON'T redirect to order-received
     // User must stay on payment page to complete authentication flow
     // Webhook will confirm the order when payment completes
     return yuno_json([
@@ -1338,7 +1345,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
  * Check order status to prevent double payment
  * Used when user reloads the order-pay page
  *
- * ✅ SECURITY: This endpoint verifies with Yuno API if payment was already processed
+ * SECURITY: This endpoint verifies with Yuno API if payment was already processed
  * to prevent the race condition where user reloads before auto-confirm completes.
  */
 function yuno_check_order_status(WP_REST_Request $request) {
@@ -1392,7 +1399,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    // 2. ✅ AUTO-DUPLICATE: If order is in failed state, signal frontend to duplicate
+    // AUTO-DUPLICATE: If order is in failed state, signal frontend to duplicate
     // This handles the F5 reload case where user refreshes a failed order
     if ($status === 'failed') {
         yuno_log('info', 'Check order status: order is failed, should duplicate', [
@@ -1409,7 +1416,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    // 3. ✅ CRITICAL: Check if payment_id exists (payment was initiated)
+    // CRITICAL: Check if payment_id exists (payment was initiated)
     // If it exists, verify with Yuno API to prevent double-payment race condition
     $payment_id = $order->get_meta('_yuno_payment_id');
 
@@ -1520,7 +1527,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
             'status'     => $verified_status,
         ]);
 
-        // ✅ Sync Yuno status with WooCommerce: mark as failed
+        //Sync Yuno status with WooCommerce: mark as failed
         if ($status !== 'failed') {
             $order->update_status('failed', 'Yuno payment failed (check-order-status): ' . $verified_status);
             $order->add_order_note('Yuno payment failed. status=' . $verified_status . ' payment_id=' . $payment_id);
@@ -1589,14 +1596,12 @@ function yuno_create_duplicate_order_internal($order) {
         $new_order->add_item($cloned_item);
     }
 
-    // Copy shipping items (clone to avoid mutating original order items)
     foreach ($order->get_items('shipping') as $item_id => $item) {
         $cloned_item = clone $item;
         $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
         $new_order->add_item($cloned_item);
     }
 
-    // Copy fees (clone to avoid mutating original order items)
     foreach ($order->get_items('fee') as $item_id => $item) {
         $cloned_item = clone $item;
         $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
@@ -1610,10 +1615,8 @@ function yuno_create_duplicate_order_internal($order) {
         $new_order->add_item($cloned_item);
     }
 
-    // Copy customer data
     $new_order->set_customer_id($order->get_customer_id());
 
-    // Copy billing address
     $new_order->set_billing_first_name($order->get_billing_first_name());
     $new_order->set_billing_last_name($order->get_billing_last_name());
     $new_order->set_billing_company($order->get_billing_company());
@@ -1637,11 +1640,9 @@ function yuno_create_duplicate_order_internal($order) {
     $new_order->set_shipping_postcode($order->get_shipping_postcode());
     $new_order->set_shipping_country($order->get_shipping_country());
 
-    // Set payment method
     $new_order->set_payment_method($order->get_payment_method());
     $new_order->set_payment_method_title($order->get_payment_method_title());
 
-    // Set currency
     $new_order->set_currency($order->get_currency());
 
     // Copy totals from original order (do NOT recalculate)
@@ -1653,10 +1654,8 @@ function yuno_create_duplicate_order_internal($order) {
     $new_order->set_cart_tax($order->get_cart_tax());
     $new_order->set_total($order->get_total());
 
-    // Set status to pending
     $new_order->set_status('pending', 'Order created from failed order #' . $order->get_id());
 
-    // Save the new order
     $new_order->save();
 
     // Store metadata linking failed order to duplicate (prevents creating multiple duplicates)
@@ -1667,11 +1666,9 @@ function yuno_create_duplicate_order_internal($order) {
     $new_order->update_meta_data('_yuno_original_order_id', $order->get_id());
     $new_order->save();
 
-    // Add note to original order
     $order->add_order_note('New order #' . $new_order->get_id() . ' created for payment retry.');
     $order->save();
 
-    // Add note to new order
     $new_order->add_order_note('Created from failed order #' . $order->get_id() . ' for payment retry.');
     $new_order->save();
 
@@ -1697,7 +1694,7 @@ function yuno_duplicate_order(WP_REST_Request $request) {
     ]);
 
     try {
-        // ✅ FIX: Check if webhook already created a duplicate order
+        //FIX: Check if webhook already created a duplicate order
         $existing_duplicate_id = $order->get_meta('_yuno_duplicate_order_id');
 
         if ($existing_duplicate_id) {
@@ -1802,7 +1799,7 @@ function yuno_verify_webhook_signature(WP_REST_Request $request) {
         return false;
     }
 
-    // ✅ CRITICAL FIX: Use WEBHOOK_HMAC_SECRET (not PRIVATE_SECRET_KEY)
+    //CRITICAL FIX: Use WEBHOOK_HMAC_SECRET (not PRIVATE_SECRET_KEY)
     $hmacSecret = (string) yuno_get_env('WEBHOOK_HMAC_SECRET', '');
 
     if ($hmacSecret === '') {
@@ -1865,11 +1862,6 @@ function yuno_handle_webhook(WP_REST_Request $request) {
         'version'    => $payload['version'] ?? null,
         'retry'      => $payload['retry'] ?? 0,
     ]);
-
-    // Log full payload in debug mode for troubleshooting
-    if (yuno_debug_enabled()) {
-        yuno_log('debug', 'Webhook: full payload', ['payload' => $payload]);
-    }
 
     // Extract event type and data
     // Support two webhook formats:
@@ -2084,7 +2076,7 @@ function yuno_webhook_handle_payment_succeeded($order, $payment_id, $event_data)
             return yuno_json(['received' => true, 'skipped' => 'already_paid'], 200);
         }
 
-        // ✅ CRITICAL: Verify payment status with Yuno API before marking as paid
+        //CRITICAL: Verify payment status with Yuno API before marking as paid
         // Don't trust webhook event alone - always verify with API
         $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
         $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
@@ -2243,7 +2235,7 @@ function yuno_webhook_handle_payment_failed($order, $payment_id, $event_data) {
         'payment_id' => $payment_id,
     ]);
 
-    // ✅ AUTO-CREATE NEW ORDER: Create duplicate order for retry (same as frontend behavior)
+    //AUTO-CREATE NEW ORDER: Create duplicate order for retry (same as frontend behavior)
     try {
         $new_order = yuno_create_duplicate_order_internal($order);
 
@@ -2343,7 +2335,6 @@ function yuno_webhook_handle_refund($order, $payment_id, $event_data) {
         $refund_amount = (float) $event_data['amount']['value'];
     }
 
-    // Add refund note
     $note = 'Yuno webhook: Refund processed (payment_id=' . $payment_id . ')';
     if ($refund_amount !== null) {
         $note .= ' - Amount: ' . wc_price($refund_amount, ['currency' => $order->get_currency()]);

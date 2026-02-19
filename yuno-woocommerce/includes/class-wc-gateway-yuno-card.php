@@ -86,7 +86,6 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
    * @param WP_Error $errors Error object to add validation errors
    */
   public function validate_checkout_fields($data, $errors) {
-    // Only validate if Yuno Card is the selected payment method
     if (!isset($data['payment_method']) || $data['payment_method'] !== $this->id) {
       return;
     }
@@ -372,11 +371,6 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     // This prevents showing the payment page again when user refreshes or goes back
     $order_status = $order->get_status();
 
-    yuno_log('debug', 'receipt_page - checking order status', [
-      'order_id' => $order->get_id(),
-      'status'   => $order_status,
-    ]);
-
     if (in_array($order_status, ['processing', 'completed', 'on-hold'], true)) {
       yuno_log('info', 'receipt_page - redirecting to order-received (order already paid)', [
         'order_id' => $order->get_id(),
@@ -401,11 +395,6 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       wp_safe_redirect($redirect_url);
       exit;
     }
-
-    yuno_log('debug', 'receipt_page - showing payment page', [
-      'order_id' => $order->get_id(),
-      'status'   => $order_status,
-    ]);
 
     $order_number = (int) $order->get_id();
     $total_html   = wp_kses_post($order->get_formatted_order_total());
