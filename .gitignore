@@ -37,12 +37,11 @@ build/
 *.temp
 *.bak
 
+# Compressed files
+*.zip
+
 # Documentation and distribution files
 INSTALACION_Y_USO.md
-yuno-sdk-woocommerce.zip
 
 # QA distribution folder
 share-to-qa/
-
-# Local testing builds
-testlocal-host.zip

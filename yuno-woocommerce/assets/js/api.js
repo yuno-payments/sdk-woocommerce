@@ -87,7 +87,7 @@ async function createPayment({ oneTimeToken, checkoutSession, orderId, orderKey 
     }),
   });
 
-  // ✅ IMPORTANT: 409 is expected for anti-double-charge guardrails
+  // IMPORTANT: 409 is expected for anti-double-charge guardrails
   // We treat it as a non-fatal "already handled / in progress" response.
   if (res.status === 409) {
     const payload = await safeJson(res);
@@ -111,7 +111,7 @@ async function createPayment({ oneTimeToken, checkoutSession, orderId, orderKey 
 async function confirmOrder({ orderId, orderKey, paymentId }) {
   const REST_BASE = assertBase();
 
-  // ✅ SECURITY: Only send payment_id, backend verifies status with Yuno API
+  // SECURITY: Only send payment_id, backend verifies status with Yuno API
   const res = await fetch(`${REST_BASE}/confirm`, {
     method: "POST",
     headers: wpHeaders({ "Content-Type": "application/json" }),
