@@ -383,8 +383,22 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
         'status'   => $order_status,
       ]);
 
-      // Direct redirect without showing any loading screen
-      wp_safe_redirect($order->get_checkout_order_received_url());
+      $redirect_url = $order->get_checkout_order_received_url();
+
+      // Check if headers already sent (receipt_page runs after header output)
+      if (headers_sent()) {
+        // Use JavaScript redirect as fallback when headers already sent
+        echo '<script type="text/javascript">';
+        echo 'window.location.href = ' . wp_json_encode($redirect_url) . ';';
+        echo '</script>';
+        echo '<noscript>';
+        echo '<meta http-equiv="refresh" content="0;url=' . esc_url($redirect_url) . '">';
+        echo '</noscript>';
+        exit;
+      }
+
+      // Headers not sent yet, use PHP redirect
+      wp_safe_redirect($redirect_url);
       exit;
     }
 

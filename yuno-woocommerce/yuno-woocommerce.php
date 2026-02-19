@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Yuno WooCommerce Gateway
  * Description: Accept payments with Yuno - cards, wallets, and local payment methods.
- * Version: 0.5.0
+ * Version: 0.5.2
  */
 
 if (!defined('ABSPATH')) exit;
 
 // Define plugin version constant for asset versioning
-define('YUNO_WC_VERSION', '0.5.0');
+define('YUNO_WC_VERSION', '0.5.2');
 
 // Ensure WooCommerce is active
 add_action('plugins_loaded', function () {

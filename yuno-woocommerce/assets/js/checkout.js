@@ -447,19 +447,18 @@ async function startYunoCheckout() {
         state.paying = true;
         setPayButtonDisabled(true);
 
-        // ✅ Replace page with loader ONLY when SDK confirms fields are valid
-        // This function is called by SDK only after successful validation
-        // IMMEDIATELY replace page with permanent loader to prevent ALL flashing
-        // This happens BEFORE any API calls, so user never sees order-pay flash
-        document.body.innerHTML = `
+        // Show loader as overlay WITHOUT destroying DOM (allows error recovery)
+        let loaderOverlay = document.createElement('div');
+        loaderOverlay.id = 'yuno-payment-loader';
+        loaderOverlay.innerHTML = `
           <div style="
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: #f7f7f7;
-            z-index: 1;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 999999;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -489,8 +488,8 @@ async function startYunoCheckout() {
               100% { transform: rotate(360deg); }
             }
           </style>
-          <div id="yuno-checkout"></div>
         `;
+        document.body.appendChild(loaderOverlay);
 
         let paymentRes; // Declare outside try-catch to access in finally block
         try {
@@ -522,6 +521,10 @@ async function startYunoCheckout() {
         } catch (e) {
           console.error("[YUNO]  createPayment failed", e);
           state.paying = false;
+
+          // Remove loader overlay to show error and allow retry
+          const overlay = document.getElementById('yuno-payment-loader');
+          if (overlay) overlay.remove();
 
           // Re-enable button to allow retry (for both APM and CARD)
           // If card fields are invalid, SDK will show validation errors on next click

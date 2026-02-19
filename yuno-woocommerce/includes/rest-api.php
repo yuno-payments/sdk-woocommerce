@@ -1872,18 +1872,57 @@ function yuno_handle_webhook(WP_REST_Request $request) {
     }
 
     // Extract event type and data
+    // Support two webhook formats:
+    // Format 1: { "type_event": "payment.succeeded", "data": {...} }
+    // Format 2: { "payment": {...} } (infer event from payment.status)
     $event_type = $payload['type_event'] ?? '';
     $event_data = $payload['data'] ?? [];
 
+    // If no type_event but payment object exists, infer event from status
+    if (empty($event_type) && isset($payload['payment'])) {
+        $payment_status = $payload['payment']['status'] ?? '';
+        $event_data = $payload['payment'];
+
+        // Map payment status to event type
+        switch ($payment_status) {
+            case 'SUCCEEDED':
+            case 'APPROVED':
+                $event_type = 'payment.succeeded';
+                break;
+            case 'REJECTED':
+            case 'DECLINED':
+            case 'FAILED':
+                $event_type = 'payment.failed';
+                break;
+            case 'CANCELLED':
+            case 'EXPIRED':
+                $event_type = 'payment.declined';
+                break;
+            default:
+                yuno_log('warning', 'Webhook: unknown payment status', [
+                    'status' => $payment_status,
+                    'payment_id' => $payload['payment']['id'] ?? null,
+                ]);
+                $event_type = 'payment.unknown';
+        }
+
+        yuno_log('info', 'Webhook: inferred event type from payment status', [
+            'payment_status' => $payment_status,
+            'inferred_event' => $event_type,
+        ]);
+    }
+
     if (empty($event_type)) {
-        yuno_log('error', 'Webhook: missing type_event', ['payload' => $payload]);
+        yuno_log('error', 'Webhook: missing type_event and unable to infer from payload', ['payload' => $payload]);
         return yuno_json(['received' => true, 'error' => 'Missing type_event'], 200);
     }
 
     // Extract payment_id from event data (try multiple possible locations)
     $payment_id = $event_data['id']
         ?? $event_data['payment_id']
-        ?? $event_data['payment']['id']
+        ?? $event_data['code']
+        ?? $payload['payment']['id']
+        ?? $payload['payment']['code']
         ?? null;
 
     if (empty($payment_id)) {
@@ -1954,47 +1993,58 @@ function yuno_handle_webhook(WP_REST_Request $request) {
 }
 /**
  * Find WooCommerce order by Yuno payment_id
+ * HPOS-compatible: uses wc_get_orders() instead of direct DB query
  *
  * @param string $payment_id
  * @param array $event_data Optional event data for fallback (merchant_order_id)
  * @return WC_Order|null
  */
 function yuno_find_order_by_payment_id($payment_id, $event_data = []) {
-    global $wpdb;
+    // Use wc_get_orders() with meta_query for HPOS compatibility
+    // This works with both traditional posts and HPOS (WC 8.2+)
+    $orders = wc_get_orders([
+        'limit'      => 1,
+        'meta_key'   => '_yuno_payment_id',
+        'meta_value' => $payment_id,
+        'return'     => 'objects',
+    ]);
 
-    // Query postmeta for orders with this payment_id
-    $order_id = $wpdb->get_var($wpdb->prepare(
-        "SELECT post_id FROM {$wpdb->postmeta}
-         WHERE meta_key = '_yuno_payment_id'
-         AND meta_value = %s
-         LIMIT 1",
-        $payment_id
-    ));
+    if (!empty($orders)) {
+        yuno_log('info', 'Webhook: found order by payment_id', [
+            'payment_id' => $payment_id,
+            'order_id'   => $orders[0]->get_id(),
+        ]);
+        return $orders[0];
+    }
 
     // Fallback: extract order_id from merchant_order_id (try multiple locations)
     $merchant_order_id = $event_data['merchant_order_id']
         ?? $event_data['payment']['merchant_order_id']
         ?? null;
 
-    if (!$order_id && !empty($merchant_order_id)) {
+    if (!empty($merchant_order_id)) {
         // Extract order_id from merchant_order_id (format: WC-{order_id})
         if (preg_match('/^WC-(\d+)$/', $merchant_order_id, $matches)) {
             $order_id = intval($matches[1]);
-            yuno_log('info', 'Webhook: found order via merchant_order_id fallback', [
-                'payment_id'        => $payment_id,
-                'merchant_order_id' => $merchant_order_id,
-                'order_id'          => $order_id,
-            ]);
+            $order = wc_get_order($order_id);
+
+            if ($order) {
+                yuno_log('info', 'Webhook: found order via merchant_order_id fallback', [
+                    'payment_id'        => $payment_id,
+                    'merchant_order_id' => $merchant_order_id,
+                    'order_id'          => $order_id,
+                ]);
+                return $order;
+            }
         }
     }
 
-    if (!$order_id) {
-        return null;
-    }
+    yuno_log('warning', 'Webhook: order not found', [
+        'payment_id'        => $payment_id,
+        'merchant_order_id' => $merchant_order_id ?? null,
+    ]);
 
-    $order = wc_get_order($order_id);
-
-    return $order ? $order : null;
+    return null;
 }
 
 /**
