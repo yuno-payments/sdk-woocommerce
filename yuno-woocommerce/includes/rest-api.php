@@ -1227,58 +1227,59 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
 
     // Handle verified status
     if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED'], true)) {
-        //DEBUG: Log product types before payment_complete()
-        $order_items_debug = [];
-        foreach ($order->get_items() as $item) {
-            $product = $item->get_product();
-            if ($product) {
-                $order_items_debug[] = [
-                    'name'         => $product->get_name(),
-                    'is_virtual'   => $product->is_virtual() ? 'YES' : 'NO',
-                    'is_downloadable' => $product->is_downloadable() ? 'YES' : 'NO',
-                    'needs_shipping' => $product->needs_shipping() ? 'YES' : 'NO',
-                ];
+        // Debug diagnostics: only run if debug mode is enabled
+        if (yuno_debug_enabled()) {
+            $order_items_debug = [];
+            foreach ($order->get_items() as $item) {
+                $product = $item->get_product();
+                if ($product) {
+                    $order_items_debug[] = [
+                        'name'         => $product->get_name(),
+                        'is_virtual'   => $product->is_virtual() ? 'YES' : 'NO',
+                        'is_downloadable' => $product->is_downloadable() ? 'YES' : 'NO',
+                        'needs_shipping' => $product->needs_shipping() ? 'YES' : 'NO',
+                    ];
+                }
             }
-        }
 
-        //DEBUG: Check if there are any filters affecting payment_complete status
-        global $wp_filter;
-        $active_filters = [];
-        if (isset($wp_filter['woocommerce_payment_complete_order_status'])) {
-            $active_filters['payment_complete_order_status'] = 'ACTIVE';
-        }
-        if (isset($wp_filter['woocommerce_order_is_paid_statuses'])) {
-            $active_filters['order_is_paid_statuses'] = 'ACTIVE';
-        }
+            global $wp_filter;
+            $active_filters = [];
+            if (isset($wp_filter['woocommerce_payment_complete_order_status'])) {
+                $active_filters['payment_complete_order_status'] = 'ACTIVE';
+            }
+            if (isset($wp_filter['woocommerce_order_is_paid_statuses'])) {
+                $active_filters['order_is_paid_statuses'] = 'ACTIVE';
+            }
 
-        yuno_log('info', 'Confirm: order product analysis BEFORE payment_complete()', [
-            'order_id'            => $order->get_id(),
-            'needs_shipping'      => $order->needs_shipping_address() ? 'YES' : 'NO',
-            'has_downloadable'    => $order->has_downloadable_item() ? 'YES' : 'NO',
-            'products'            => $order_items_debug,
-            'current_status'      => $order->get_status(),
-            'active_filters'      => $active_filters ?: 'NONE',
-        ]);
+            yuno_log('info', 'Confirm: order product analysis BEFORE payment_complete()', [
+                'order_id'            => $order->get_id(),
+                'needs_shipping'      => $order->needs_shipping_address() ? 'YES' : 'NO',
+                'has_downloadable'    => $order->has_downloadable_item() ? 'YES' : 'NO',
+                'products'            => $order_items_debug,
+                'current_status'      => $order->get_status(),
+                'active_filters'      => $active_filters ?: 'NONE',
+            ]);
+        }
 
         $order->payment_complete($payment_id);
-
-        //DEBUG: Check status immediately after payment_complete(), BEFORE save()
-        $status_after_payment_complete = $order->get_status();
 
         $order->add_order_note('Yuno payment approved (verified). status=' . $verified_status . ' payment_id=' . $payment_id);
         $order->save();
 
-        //DEBUG: Check status again after save()
-        $status_after_save = $order->get_status();
+        // Debug diagnostics: only run if debug mode is enabled
+        if (yuno_debug_enabled()) {
+            $status_after_payment_complete = $order->get_status();
+            $status_after_save = $order->get_status();
 
-        yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete()', [
-            'order_id'                      => $order->get_id(),
-            'payment_id'                    => $payment_id,
-            'status_after_payment_complete' => $status_after_payment_complete,
-            'status_after_save'             => $status_after_save,
-            'needs_shipping'                => $order->needs_shipping_address() ? 'YES' : 'NO',
-            'expected'                      => $order->needs_shipping_address() ? 'processing' : 'completed',
-        ]);
+            yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete()', [
+                'order_id'                      => $order->get_id(),
+                'payment_id'                    => $payment_id,
+                'status_after_payment_complete' => $status_after_payment_complete,
+                'status_after_save'             => $status_after_save,
+                'needs_shipping'                => $order->needs_shipping_address() ? 'YES' : 'NO',
+                'expected'                      => $order->needs_shipping_address() ? 'processing' : 'completed',
+            ]);
+        }
 
         return yuno_json([
             'ok'        => true,

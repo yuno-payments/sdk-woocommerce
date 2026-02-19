@@ -65,7 +65,8 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     }
 
     // Check if order is already paid
-    $paid_statuses = ['processing', 'completed', 'on-hold'];
+    // Note: on-hold is NOT included because it's used for PENDING/3DS payments
+    $paid_statuses = ['processing', 'completed'];
 
     if ($order->is_paid() || in_array($order->get_status(), $paid_statuses, true)) {
       yuno_log('info', 'Early redirect: order already paid', [
@@ -369,9 +370,10 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
     // If order is already paid, redirect immediately to order-received page
     // This prevents showing the payment page again when user refreshes or goes back
+    // Note: on-hold is NOT included because it's used for PENDING/3DS payments
     $order_status = $order->get_status();
 
-    if (in_array($order_status, ['processing', 'completed', 'on-hold'], true)) {
+    if (in_array($order_status, ['processing', 'completed'], true)) {
       yuno_log('info', 'receipt_page - redirecting to order-received (order already paid)', [
         'order_id' => $order->get_id(),
         'status'   => $order_status,
