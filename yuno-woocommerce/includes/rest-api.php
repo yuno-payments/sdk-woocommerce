@@ -21,7 +21,6 @@ function yuno_get_env($key, $default = '') {
             'SPLIT_FIXED_AMOUNT'     => 'split_fixed_amount',
             'SPLIT_COMMISSION_PERCENT' => 'split_commission_percent',
 
-            // Webhook security settings
             'WEBHOOK_HMAC_SECRET'    => 'webhook_hmac_secret',
             'WEBHOOK_API_KEY'        => 'webhook_api_key',
             'WEBHOOK_X_SECRET'       => 'webhook_x_secret',
@@ -143,7 +142,6 @@ function yuno_get_order_from_request(WP_REST_Request $request) {
 
     $params = (array) $request->get_json_params();
 
-    // accept snake_case + camelCase
     $order_id  = absint($params['order_id'] ?? $params['orderId'] ?? 0);
     $order_key = wc_clean(wp_unslash($params['order_key'] ?? $params['orderKey'] ?? ''));
 
@@ -171,14 +169,11 @@ function yuno_build_idempotency_key($order_id, $checkout_session) {
 
     if ($order) {
         $attempt_count = (int) $order->get_meta('_yuno_payment_attempt_count', true);
-
-        // Increment attempt count for this payment try
         $attempt_count++;
         $order->update_meta_data('_yuno_payment_attempt_count', $attempt_count);
         $order->save();
     }
 
-    // Include attempt count in idempotency key to allow retries
     $base = ((int)$order_id) . '|' . ((string)$checkout_session) . '|attempt-' . $attempt_count . '|' . get_site_url();
     $hash = wp_hash($base, 'auth');
     return 'wc-' . (int)$order_id . '-a' . $attempt_count . '-' . substr($hash, 0, 20);
@@ -314,7 +309,6 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         'amount_value'  => $amount_value,
     ]);
 
-    //Try to get or create Yuno Customer (optional, graceful degradation)
     yuno_log('info', '[CHECKOUT SESSION]About to call yuno_get_or_create_customer', [
         'order_id' => $order->get_id(),
     ]);
@@ -326,7 +320,6 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         'customer_id' => $customer_id ?: 'NULL',
     ]);
 
-    // Build base payload
     $payload = [
         'account_id'         => $accountId,
         'merchant_order_id'  => 'WC-' . $order->get_id(),
@@ -338,7 +331,6 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ],
     ];
 
-    //Add customer_id if customer was created successfully
     if (!empty($customer_id)) {
         // According to Yuno API spec, customer_id is a direct string field, not a nested object
         $payload['customer_id'] = $customer_id;
@@ -352,7 +344,6 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ]);
     }
 
-    //Add billing_address from order data (always send current data)
     $billing_country  = $order->get_billing_country();
     $billing_state    = $order->get_billing_state();
     $billing_city     = $order->get_billing_city();
@@ -376,7 +367,6 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ]);
     }
 
-    //Add shipping_address from order data (always send current data)
     $shipping_country  = $order->get_shipping_country() ?: $billing_country;
     $shipping_state    = $order->get_shipping_state() ?: $billing_state;
     $shipping_city     = $order->get_shipping_city() ?: $billing_city;
@@ -660,7 +650,6 @@ function yuno_get_or_create_customer($order) {
         'order_id' => $order->get_id(),
     ]);
 
-    //Check if customer already created for THIS order (reuse within same order)
     $existing_customer_id = $order->get_meta('_yuno_customer_id');
     if (!empty($existing_customer_id)) {
         yuno_log('info', '[CUSTOMER]Reusing existing customer_id from order meta', [
@@ -687,7 +676,6 @@ function yuno_get_or_create_customer($order) {
         'is_guest' => empty($user_id) ? 'YES' : 'NO',
     ]);
 
-    // Build customer payload from order data
     $billing_first  = $order->get_billing_first_name();
     $billing_last   = $order->get_billing_last_name();
     $billing_email  = $order->get_billing_email();
@@ -1874,33 +1862,45 @@ function yuno_handle_webhook(WP_REST_Request $request) {
     // If no type_event but payment object exists, infer event from status
     if (empty($event_type) && isset($payload['payment'])) {
         $payment_status = $payload['payment']['status'] ?? '';
+        $payment_sub_status = $payload['payment']['sub_status'] ?? '';
         $event_data = $payload['payment'];
 
-        // Map payment status to event type
-        switch ($payment_status) {
-            case 'SUCCEEDED':
-            case 'APPROVED':
-                $event_type = 'payment.succeeded';
-                break;
-            case 'REJECTED':
-            case 'DECLINED':
-            case 'FAILED':
-                $event_type = 'payment.failed';
-                break;
-            case 'CANCELLED':
-            case 'EXPIRED':
-                $event_type = 'payment.declined';
-                break;
-            default:
-                yuno_log('warning', 'Webhook: unknown payment status', [
-                    'status' => $payment_status,
-                    'payment_id' => $payload['payment']['id'] ?? null,
-                ]);
-                $event_type = 'payment.unknown';
+        // Check sub_status first for special cases
+        if (strtoupper($payment_sub_status) === 'PARTIALLY_REFUNDED') {
+            // SUCCEEDED + PARTIALLY_REFUNDED = partial refund
+            $event_type = 'payment.refund';
+        } elseif (strtoupper($payment_status) === 'REFUNDED') {
+            // REFUNDED status = full or partial refund (check sub_status in handler)
+            $event_type = 'payment.refund';
+        } else {
+            // Map payment status to event type
+            switch ($payment_status) {
+                case 'SUCCEEDED':
+                case 'APPROVED':
+                    $event_type = 'payment.succeeded';
+                    break;
+                case 'REJECTED':
+                case 'DECLINED':
+                case 'FAILED':
+                    $event_type = 'payment.failed';
+                    break;
+                case 'CANCELLED':
+                case 'EXPIRED':
+                    $event_type = 'payment.declined';
+                    break;
+                default:
+                    yuno_log('warning', 'Webhook: unknown payment status', [
+                        'status' => $payment_status,
+                        'sub_status' => $payment_sub_status,
+                        'payment_id' => $payload['payment']['id'] ?? null,
+                    ]);
+                    $event_type = 'payment.unknown';
+            }
         }
 
         yuno_log('info', 'Webhook: inferred event type from payment status', [
             'payment_status' => $payment_status,
+            'payment_sub_status' => $payment_sub_status,
             'inferred_event' => $event_type,
         ]);
     }
@@ -2315,6 +2315,12 @@ function yuno_webhook_handle_chargeback($order, $payment_id, $event_data) {
 /**
  * Handle payment.refunds webhook
  *
+ * Refund determination based on status, sub_status AND amount:
+ * 1. Full refund: (status=REFUNDED AND sub_status=REFUNDED) OR total_refunded >= order_total
+ *    → Order status changed to 'refunded'
+ * 2. Partial refund: any other case (e.g. status=SUCCEEDED, sub_status=PARTIALLY_REFUNDED)
+ *    → Order status remains unchanged, refund object created, note added
+ *
  * @param WC_Order $order
  * @param string $payment_id
  * @param array $event_data
@@ -2322,42 +2328,167 @@ function yuno_webhook_handle_chargeback($order, $payment_id, $event_data) {
  */
 function yuno_webhook_handle_refund($order, $payment_id, $event_data) {
     $order_id = $order->get_id();
+    $order_total = (float) $order->get_total();
+
+    // Extract status and sub_status to determine refund type
+    $status = strtoupper($event_data['status'] ?? '');
+    $sub_status = strtoupper($event_data['sub_status'] ?? '');
 
     yuno_log('info', 'Webhook: payment.refunds', [
         'order_id'     => $order_id,
         'payment_id'   => $payment_id,
         'order_status' => $order->get_status(),
+        'order_total'  => $order_total,
+        'yuno_status'  => $status,
+        'yuno_sub_status' => $sub_status,
         'event_data'   => $event_data,
     ]);
 
-    // Extract refund amount if available
+    // Extract refund amount from the transaction, not the order total
+    // Priority: transactions.amount (this specific refund) > amount.refunded (total refunded)
     $refund_amount = null;
-    if (isset($event_data['amount']['value'])) {
-        $refund_amount = (float) $event_data['amount']['value'];
+    if (isset($event_data['transactions']['amount'])) {
+        // This is the amount of THIS specific refund transaction
+        $refund_amount = (float) $event_data['transactions']['amount'];
+    } elseif (isset($event_data['amount']['refunded'])) {
+        // Fallback: use the total refunded amount from Yuno
+        $refund_amount = (float) $event_data['amount']['refunded'];
     }
 
-    $note = 'Yuno webhook: Refund processed (payment_id=' . $payment_id . ')';
-    if ($refund_amount !== null) {
-        $note .= ' - Amount: ' . wc_price($refund_amount, ['currency' => $order->get_currency()]);
+    if ($refund_amount === null || $refund_amount <= 0) {
+        yuno_log('warning', 'Webhook: refund without valid amount', [
+            'order_id'   => $order_id,
+            'payment_id' => $payment_id,
+            'status'     => $status,
+            'sub_status' => $sub_status,
+        ]);
+
+        $order->add_order_note(sprintf(
+            'Yuno webhook: Refund event received but amount not specified (status=%s, sub_status=%s, payment_id=%s)',
+            $status,
+            $sub_status,
+            $payment_id
+        ));
+        $order->save();
+
+        return yuno_json(['received' => true, 'warning' => 'No refund amount'], 200);
     }
 
-    $order->add_order_note($note);
+    $already_refunded = $order->get_total_refunded();
+    $new_total_refunded = $already_refunded + $refund_amount;
 
-    // Optionally update status to refunded if not already
-    // We don't create WooCommerce refund object automatically because
-    // the refund was processed externally in Yuno
-    if (!in_array($order->get_status(), ['refunded', 'cancelled'], true)) {
-        $order->update_status('refunded', 'Yuno webhook: Order refunded in Yuno');
+    // Determine if this is partial or full refund by checking BOTH status fields AND amounts
+    // This protects against inconsistencies (e.g. status says partial but amount is 100%)
+    $amount_is_full = ($new_total_refunded >= ($order_total - 0.01)); // 0.01 margin for float precision
+    $status_indicates_full = ($status === 'REFUNDED' && $sub_status === 'REFUNDED');
+
+    // Full refund if EITHER:
+    // 1. Both status fields indicate full refund (REFUNDED + REFUNDED), OR
+    // 2. Total refunded amount equals or exceeds order total (regardless of what status says)
+    $is_full_refund = $status_indicates_full || $amount_is_full;
+
+    yuno_log('info', 'Webhook: refund analysis', [
+        'order_id'             => $order_id,
+        'order_total'          => $order_total,
+        'refund_amount'        => $refund_amount,
+        'already_refunded'     => $already_refunded,
+        'new_total_refunded'   => $new_total_refunded,
+        'status'               => $status,
+        'sub_status'           => $sub_status,
+        'amount_is_full'       => $amount_is_full,
+        'status_indicates_full'=> $status_indicates_full,
+        'is_full_refund'       => $is_full_refund,
+    ]);
+
+    try {
+        $refund = wc_create_refund([
+            'amount'         => $refund_amount,
+            'reason'         => sprintf('Yuno %s refund (payment_id=%s)',
+                                       $is_full_refund ? 'full' : 'partial',
+                                       $payment_id),
+            'order_id'       => $order_id,
+            'line_items'     => [], // Empty = refund without specific items
+            'refund_payment' => false, // Already processed in Yuno
+            'restock_items'  => false, // No automatic restock
+        ]);
+
+        if (is_wp_error($refund)) {
+            yuno_log('error', 'Webhook: failed to create WC refund object', [
+                'order_id'   => $order_id,
+                'error'      => $refund->get_error_message(),
+            ]);
+
+            $note = sprintf(
+                'Yuno webhook: %s refund processed externally (payment_id=%s) - Amount: %s',
+                $is_full_refund ? 'Full' : 'Partial',
+                $payment_id,
+                wc_price($refund_amount, ['currency' => $order->get_currency()])
+            );
+            $order->add_order_note($note);
+        } else {
+            yuno_log('info', 'Webhook: WC refund object created', [
+                'order_id'   => $order_id,
+                'refund_id'  => $refund->get_id(),
+                'amount'     => $refund_amount,
+                'type'       => $is_full_refund ? 'full' : 'partial',
+            ]);
+        }
+    } catch (Exception $e) {
+        yuno_log('error', 'Webhook: exception creating refund', [
+            'order_id' => $order_id,
+            'error'    => $e->getMessage(),
+        ]);
+
+        $order->add_order_note(sprintf(
+            'Yuno webhook: Refund error - %s (payment_id=%s, amount=%s)',
+            $e->getMessage(),
+            $payment_id,
+            wc_price($refund_amount, ['currency' => $order->get_currency()])
+        ));
+    }
+
+    if ($is_full_refund) {
+        if (!in_array($order->get_status(), ['refunded', 'cancelled'], true)) {
+            $order->update_status('refunded', sprintf(
+                'Yuno webhook: Order fully refunded (total: %s)',
+                wc_price($new_total_refunded, ['currency' => $order->get_currency()])
+            ));
+
+            yuno_log('info', 'Webhook: order status changed to refunded', [
+                'order_id'          => $order_id,
+                'total_refunded'    => $new_total_refunded,
+                'order_total'       => $order_total,
+            ]);
+        }
+    } else {
+        $note = sprintf(
+            'Yuno webhook: Partial refund of %s (payment_id=%s). Total refunded: %s of %s (%.1f%%)',
+            wc_price($refund_amount, ['currency' => $order->get_currency()]),
+            $payment_id,
+            wc_price($new_total_refunded, ['currency' => $order->get_currency()]),
+            wc_price($order_total, ['currency' => $order->get_currency()]),
+            ($new_total_refunded / $order_total) * 100
+        );
+        $order->add_order_note($note);
+
+        yuno_log('info', 'Webhook: partial refund processed, status unchanged', [
+            'order_id'          => $order_id,
+            'refund_amount'     => $refund_amount,
+            'total_refunded'    => $new_total_refunded,
+            'order_total'       => $order_total,
+            'remaining'         => $order_total - $new_total_refunded,
+            'refund_percentage' => ($new_total_refunded / $order_total) * 100,
+        ]);
     }
 
     $order->save();
 
-    yuno_log('info', 'Webhook: payment.refunds - order updated', [
-        'order_id'      => $order_id,
-        'payment_id'    => $payment_id,
-        'order_status'  => $order->get_status(),
-        'refund_amount' => $refund_amount,
-    ]);
-
-    return yuno_json(['received' => true, 'order_updated' => true], 200);
+    return yuno_json([
+        'received'       => true,
+        'order_updated'  => true,
+        'refund_type'    => $is_full_refund ? 'full' : 'partial',
+        'refund_amount'  => $refund_amount,
+        'total_refunded' => $new_total_refunded,
+        'order_status'   => $order->get_status(),
+    ], 200);
 }
