@@ -94,6 +94,8 @@ yuno-woocommerce/
 
 ### Development with wp-env
 
+Requires **Docker Desktop** running locally.
+
 1. Install dependencies:
    ```bash
    npm install
@@ -101,12 +103,24 @@ yuno-woocommerce/
 
 2. Start the environment:
    ```bash
-   npx wp-env start
+   npm run env:start
    ```
 
 3. Access WordPress at `http://localhost:8888`
+   - Username: `admin`
+   - Password: `password`
 
 4. Configure the plugin via WordPress Admin UI
+
+#### Available environment commands
+
+| Command | Description |
+|---|---|
+| `npm run env:start` | Creates and starts the Docker containers |
+| `npm run env:stop` | Stops the containers (data is preserved) |
+| `npm run env:restart` | Stops then starts (useful after config changes) |
+| `npm run env:destroy` | Removes all containers and data |
+| `npm run env:clean` | Resets WordPress to a clean state |
 
 ---
 

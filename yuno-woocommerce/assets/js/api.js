@@ -44,7 +44,7 @@ async function getPublicApiKey() {
   return json.publicApiKey;
 }
 
-async function getCheckoutSession({ orderId, orderKey }) {
+async function getCheckoutSession({ orderId, orderKey, customer_id }) {
   const REST_BASE = assertBase();
 
   const res = await fetch(`${REST_BASE}/checkout-session`, {
@@ -53,6 +53,7 @@ async function getCheckoutSession({ orderId, orderKey }) {
     body: JSON.stringify({
       order_id: orderId,
       order_key: orderKey,
+      customer_id: customer_id || null,
     }),
   });
 
@@ -64,61 +65,38 @@ async function getCheckoutSession({ orderId, orderKey }) {
   return res.json();
 }
 
-async function createPayment({ oneTimeToken, checkoutSession, orderId, orderKey }) {
+async function createCustomer({ orderId, orderKey }) {
   const REST_BASE = assertBase();
 
-  const res = await fetch(`${REST_BASE}/payments`, {
-    method: "POST",
-    headers: wpHeaders({ "Content-Type": "application/json" }),
+  const res = await fetch(`${REST_BASE}/customer`, {
+    method: 'POST',
+    headers: wpHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
-      oneTimeToken,
-      checkoutSession,
       order_id: orderId,
       order_key: orderKey,
-      browser_info: {
-        user_agent: navigator.userAgent,
-        language: navigator.language,
-        platform: "WEB",
-        screen_height: window.screen?.height,
-        screen_width: window.screen?.width,
-        color_depth: window.screen?.colorDepth,
-        javascript_enabled: true,
-      },
     }),
   });
 
-  // IMPORTANT: 409 is expected for anti-double-charge guardrails
-  // We treat it as a non-fatal "already handled / in progress" response.
-  if (res.status === 409) {
-    const payload = await safeJson(res);
-
-    return {
-      ok: false,
-      handled: true,          // <-- tells checkout.js this is expected
-      http_status: 409,
-      ...payload,
-    };
-  }
+  const json = await safeJson(res);
 
   if (!res.ok) {
-    const payload = await safeJson(res);
-    throw new Error(`payments failed: ${res.status} ${JSON.stringify(payload)}`);
+    console.warn('[YUNO] createCustomer failed:', res.status, json);
+    return null;  // graceful degradation
   }
 
-  return res.json();
+  return json.customer_id || null;
 }
 
-async function confirmOrder({ orderId, orderKey, paymentId }) {
+async function confirmOrder({ orderId, orderKey, paymentStatus }) {
   const REST_BASE = assertBase();
 
-  // SECURITY: Only send payment_id, backend verifies status with Yuno API
   const res = await fetch(`${REST_BASE}/confirm`, {
     method: "POST",
     headers: wpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
-      order_id: orderId,
-      order_key: orderKey,
-      payment_id: paymentId,
+      order_id:       orderId,
+      order_key:      orderKey,
+      payment_status: paymentStatus || null,
     }),
   });
 
@@ -177,7 +155,7 @@ async function duplicateOrder({ orderId, orderKey }) {
 window.YUNO_API = {
   getPublicApiKey,
   getCheckoutSession,
-  createPayment,
+  createCustomer,
   confirmOrder,
   checkOrderStatus,
   duplicateOrder,

@@ -32,8 +32,8 @@
   // Get API functions from global scope (loaded from api.js)
   const {
     getCheckoutSession,
-    createPayment,
     getPublicApiKey,
+    createCustomer,
     confirmOrder,
     checkOrderStatus,
     duplicateOrder,
@@ -62,6 +62,24 @@ const state = {
   lastPaymentId: null,
   renderMode: "modal",
 };
+
+const PAYMENT_STATUS = {
+  SUCCEEDED: 'SUCCEEDED',
+  VERIFIED:  'VERIFIED',
+  PAYED:     'PAYED',
+  PENDING:   'PENDING',
+  REJECTED:  'REJECTED',
+  DECLINED:  'DECLINED',
+  CANCELED:  'CANCELED',
+  ERROR:     'ERROR',
+  EXPIRED:   'EXPIRED',
+};
+
+const SUCCESS_STATUSES  = [PAYMENT_STATUS.SUCCEEDED, PAYMENT_STATUS.VERIFIED, PAYMENT_STATUS.PAYED];
+const PENDING_STATUSES  = [PAYMENT_STATUS.PENDING];
+const FAILURE_STATUSES  = [PAYMENT_STATUS.REJECTED, PAYMENT_STATUS.DECLINED,
+                           PAYMENT_STATUS.CANCELED, PAYMENT_STATUS.ERROR,
+                           PAYMENT_STATUS.EXPIRED];
 
 function setPayButtonVisible(visible) {
   const btn = document.getElementById("yuno-button-pay");
@@ -255,13 +273,29 @@ async function startYunoCheckout() {
       return;
     }
 
+    // Create Yuno customer before checkout session (customer_id required by checkout session API)
+    let customerId = null;
+    if (state.payForOrder && state.orderId) {
+      try {
+        customerId = await createCustomer({
+          orderId: state.orderId,
+          orderKey: state.orderKey,
+        });
+        console.log('[YUNO] createCustomer →', customerId ?? 'null (graceful)');
+      } catch (e) {
+        console.warn('[YUNO] createCustomer error (continuing without customer_id):', e);
+      }
+    }
+
+    console.log('customerId', customerId);
+
     const sessionRes = await getCheckoutSession({
-      // send both styles for backend robustness
       orderId: state.orderId,
       orderKey: state.orderKey,
-      order_id: state.orderId,
-      order_key: state.orderKey,
+      customer_id: customerId,
     });
+
+    console.log('sessionRes', sessionRes);
 
     const checkoutSession = sessionRes?.checkout_session;
     const country = sessionRes?.country;
@@ -285,14 +319,23 @@ async function startYunoCheckout() {
     const RENDER_MODE_TYPE = "modal";
     state.renderMode = RENDER_MODE_TYPE;
 
-    await yunoInstance.startCheckout({
+    console.log("[YUNO] startSeamlessCheckout →", {
+      checkoutSession: state.checkoutSession,
+      countryCode: state.countryCode,
+      renderMode: RENDER_MODE_TYPE,
+    });
+
+    await yunoInstance.startSeamlessCheckout({
       checkoutSession: state.checkoutSession,
       elementSelector: "#yuno-root",
       countryCode: state.countryCode,
       language: ctx.language || "es", // Use WordPress language, fallback to Spanish
-      showLoading: false, // Disable SDK loader to prevent "One moment please" flash
-      keepLoader: false,
-
+      showLoading: true, // Disable SDK loader to prevent "One moment please" flash
+      issuersFormEnable: true,
+      showPaymentStatus: true,
+      onLoading: (isLoading) => {
+        console.log("[YUNO] onLoading →", isLoading);
+      },
       renderMode: {
         type: RENDER_MODE_TYPE,
         elementSelector: {
@@ -300,7 +343,6 @@ async function startYunoCheckout() {
           actionForm: "#yuno-action-form",
         },
       },
-
       card: {
         type: "extends",
         styles: "",
@@ -339,17 +381,21 @@ async function startYunoCheckout() {
           }
         }
       },
-
       /**
        * Called when user selects a payment method
-       * Handles different logic for modal vs element mode
+       * In seamless SDK, must call mountSeamlessCheckout with the selected type
        */
       yunoPaymentMethodSelected: (data) => {
+        console.log("[YUNO] yunoPaymentMethodSelected →", data);
+
         // Reset payment state when user changes payment method
         // This allows switching between payment methods without getting stuck
         state.paying = false;
 
         state.selectedPaymentMethod = data?.type;
+
+        // Show Pay button now that a method is selected
+        setPayButtonVisible(true);
 
         // If APM (not CARD), enable button immediately
         // APMs don't have field validation like cards
@@ -369,19 +415,43 @@ async function startYunoCheckout() {
       },
 
       /**
-       * Called by SDK when it has a oneTimeToken
-       * Here we call our backend /payments (which calls Yuno API)
+       * Payment result from SDK UI flow (Seamless SDK handles payment internally)
+       * result is a status string: "SUCCEEDED", "PENDING", "REJECTED", etc.
+       * We confirm the Woo order by verifying with our backend.
        */
-      async yunoCreatePayment(oneTimeToken) {
-        if (state.paid) return;
+      yunoPaymentResult: async (result) => {
+        // result is a plain status string from the Yuno SDK
+        const paymentStatus = typeof result === 'string' ? result : String(result || '');
+        console.log("[YUNO] yunoPaymentResult →", paymentStatus);
 
-        state.paying = true;
-        setPayButtonDisabled(true);
+        // ── PENDING (3DS / async flow in progress) ─────────────────────────
+        // Do NOT show the full-page overlay — the 3DS modal must remain visible.
+        if (PENDING_STATUSES.includes(paymentStatus)) {
+          console.log("[YUNO] Payment PENDING — staying on page for 3DS/authentication flow...");
+          try {
+            if (state.payForOrder && state.orderId) {
+              const confirmRes = await confirmOrder({
+                orderId: state.orderId,
+                orderKey: state.orderKey,
+                paymentStatus,
+              });
+              if (confirmRes?.pending) {
+                console.log("[YUNO] Backend confirmed PENDING, SDK continues handling flow");
+                return;
+              }
+              // If backend unexpectedly returns ok+redirect, honour it
+              if (confirmRes?.ok && confirmRes?.redirect) {
+                window.location.href = confirmRes.redirect;
+                return;
+              }
+            }
+          } catch (e) {
+            console.error("[YUNO] confirmOrder error (PENDING)", e);
+          }
+          return;
+        }
 
-        // Replace page with loader ONLY when SDK confirms fields are valid
-        // This function is called by SDK only after successful validation
-        // IMMEDIATELY replace page with permanent loader to prevent ALL flashing
-        // This happens BEFORE any API calls, so user never sees order-pay flash
+        // Show full-page loader for SUCCESS and FAILURE statuses
         document.body.innerHTML = `
           <div style="
             position: fixed;
@@ -390,7 +460,7 @@ async function startYunoCheckout() {
             width: 100%;
             height: 100%;
             background: #f7f7f7;
-            z-index: 1;
+            z-index: 9999;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -423,99 +493,88 @@ async function startYunoCheckout() {
           <div id="yuno-checkout"></div>
         `;
 
-        let paymentRes; // Declare outside try-catch to access in finally block
-        try {
-          const payload = {
-            oneTimeToken,
-            checkoutSession: state.checkoutSession,
+        // ── SUCCESS (SUCCEEDED or VERIFIED) ────────────────────────────────
+        if (SUCCESS_STATUSES.includes(paymentStatus)) {
+          try {
+            if (state.payForOrder && state.orderId) {
+              const confirmRes = await confirmOrder({
+                orderId: state.orderId,
+                orderKey: state.orderKey,
+                paymentStatus,
+              });
 
-            orderId: state.orderId,
-            orderKey: state.orderKey,
-            order_id: state.orderId,
-            order_key: state.orderKey,
-          };
-
-          paymentRes = await createPayment(payload);
-
-          if (paymentRes?.handled) {
-            console.warn("[YUNO] createPayment returned 409 (handled)", paymentRes);
-            return;
-          }
-
-          // Source of truth (more reliable than yunoPaymentResult payload)
-          state.lastPaymentId = paymentRes?.payment_id || paymentRes?.response?.id || null;
-        } catch (e) {
-          console.error("[YUNO]  createPayment failed", e);
-          state.paying = false;
-
-          // Re-enable button to allow retry (for both APM and CARD)
-          // If card fields are invalid, SDK will show validation errors on next click
-          // If card fields are valid, user can retry immediately without modifying fields
-          setPayButtonDisabled(false);
-
-          throw e;
-        } finally {
-          // Always call continuePayment to let SDK render its UI (3DS, PENDING, etc.)
-          yunoInstance.continuePayment();
-        }
-      },
-
-      /**
-       * Payment result from SDK UI flow
-       * We confirm the Woo order based on what our backend returned from /payments
-       */
-      yunoPaymentResult: async (result) => {
-        try {
-          const paymentId = state.lastPaymentId || null;
-
-          if (state.payForOrder && state.orderId) {
-            // Only send payment_id, backend verifies status with Yuno API
-            const confirmRes = await confirmOrder({
-              // both formats (defensive)
-              orderId: state.orderId,
-              orderKey: state.orderKey,
-              order_id: state.orderId,
-              order_key: state.orderKey,
-
-              paymentId,
-              payment_id: paymentId,
-            });
-
-            // Backend verifies with Yuno API and updates order status
-            if (confirmRes?.ok) {
-              // For PENDING payments (3DS, etc.), don't redirect
-              // Let SDK handle the flow, webhook will confirm when payment completes
-              if (confirmRes.pending) {
-                console.log("[YUNO] Payment is PENDING, staying on page for 3DS/authentication flow...");
+              if (confirmRes?.ok) {
+                if (confirmRes.pending) {
+                  console.log("[YUNO] Payment is PENDING, staying on page for async flow...");
+                  return;
+                }
+                state.paid = true;
+                setPayButtonDisabled(true);
+                if (confirmRes.redirect) {
+                  window.location.href = confirmRes.redirect;
+                  return;
+                }
+                window.location.reload();
                 return;
               }
 
-              // Payment confirmed (SUCCEEDED, VERIFIED, APPROVED)
-              state.paid = true;
-              setPayButtonDisabled(true);
-
-              // Direct redirect to order-received (no reload to avoid interrupting SDK modal)
-              if (confirmRes.redirect) {
-                window.location.href = confirmRes.redirect;
+              if (confirmRes?.failed) {
+                try {
+                  const duplicateRes = await duplicateOrder({
+                    orderId: state.orderId,
+                    orderKey: state.orderKey,
+                  });
+                  if (duplicateRes?.ok && duplicateRes?.new_order_id) {
+                    console.log("[YUNO] New order created:", duplicateRes.new_order_id);
+                    await reinitializeWithNewOrder(
+                      duplicateRes.new_order_id,
+                      duplicateRes.new_order_key,
+                      duplicateRes.formatted_total,
+                      duplicateRes.pay_url
+                    );
+                    return;
+                  }
+                } catch (e) {
+                  console.error("[YUNO] Failed to create new order", e);
+                }
+                state.paying = false;
+                setPayButtonDisabled(false);
                 return;
               }
 
-              // Fallback: reload if no redirect URL provided
-              window.location.reload();
-              return;
+              state.paying = false;
+              setPayButtonDisabled(false);
             }
+          } catch (e) {
+            console.error("[YUNO] confirmOrder error (SUCCESS)", e);
+            state.paying = false;
+            setPayButtonDisabled(false);
+          }
+          return;
+        }
 
-            // Payment failed => create new order and reinitialize
-            if (confirmRes?.failed) {
+        // ── FAILURE (REJECTED, DECLINED, CANCELED, ERROR, EXPIRED) ─────────
+        if (FAILURE_STATUSES.includes(paymentStatus)) {
+          try {
+            if (state.payForOrder && state.orderId) {
+              // Notify backend so it can mark the order as failed
+              try {
+                await confirmOrder({
+                  orderId: state.orderId,
+                  orderKey: state.orderKey,
+                  paymentStatus,
+                });
+              } catch (e) {
+                console.warn("[YUNO] confirmOrder error (FAILURE, continuing with duplicate)", e);
+              }
+
               try {
                 const duplicateRes = await duplicateOrder({
                   orderId: state.orderId,
                   orderKey: state.orderKey,
                 });
-
                 if (duplicateRes?.ok && duplicateRes?.new_order_id) {
                   console.log("[YUNO] New order created:", duplicateRes.new_order_id);
-
                   await reinitializeWithNewOrder(
                     duplicateRes.new_order_id,
                     duplicateRes.new_order_key,
@@ -528,25 +587,27 @@ async function startYunoCheckout() {
                 console.error("[YUNO] Failed to create new order", e);
               }
 
-              // Fallback: if duplication fails, just allow retry on same order
               state.paying = false;
               setPayButtonDisabled(false);
-              return;
             }
-
+          } catch (e) {
+            console.error("[YUNO] Error handling FAILURE status", e);
             state.paying = false;
             setPayButtonDisabled(false);
           }
-        } catch (e) {
-          console.error("[YUNO] confirmOrder error", e);
-          state.paying = false;
-          setPayButtonDisabled(false);
+          return;
         }
+
+        // Unknown status — log a warning, allow retry
+        console.warn("[YUNO] Unknown payment status:", paymentStatus);
+        state.paying = false;
+        setPayButtonDisabled(false);
       },
 
-      yunoError: async (error) => {
+      yunoError: async (error, data) => {
         console.error("[YUNO]  yunoError", {
           error,
+          data,
           selectedMethod: state.selectedPaymentMethod,
           timestamp: new Date().toISOString()
         });
@@ -587,13 +648,17 @@ async function startYunoCheckout() {
         // If card fields are invalid, SDK will show validation errors on next click
         // If card fields are valid, user can retry immediately without modifying fields
         setPayButtonDisabled(false);
+        console.log("[YUNO] hideLoader (yunoError)");
+        yunoInstance?.hideLoader();
       },
 
       // Modal events: track 3DS and other modal interactions
       yunoModalOpened: (data) => {
+        console.log("[YUNO] yunoModalOpened →", data);
       },
 
       yunoModalClosed: (data) => {
+        console.log("[YUNO] yunoModalClosed →", { data, wasPaying: state.paying });
         // Handle 3DS modal close without completion
         // If user closes 3DS modal, reset payment state to allow retry
         if (state.paying) {
@@ -601,17 +666,20 @@ async function startYunoCheckout() {
           setPayButtonDisabled(false);
         }
       },
-
-      yunoLoading: (isLoading) => {
-      },
     });
 
-    yunoInstance.mountCheckout();
+    // TODO: replace "CARD" with state.selectedPaymentMethod once yunoPaymentMethodSelected
+    // is confirmed to fire in the WooCommerce order-pay context.
+    const paymentMethodType = state.selectedPaymentMethod || "CARD";
+    console.log("[YUNO] mountSeamlessCheckout →", { paymentMethodType });
+    yunoInstance.mountSeamlessCheckout({ paymentMethodType });
+    // yunoInstance.startPayment();
     state.started = true;
 
     // Show button now that SDK is mounted, but keep it disabled until card fields are valid
     setPayButtonVisible(true);
     setPayButtonDisabled(true);
+    console.log("[YUNO] startSeamlessCheckout ✓ — checkout mounted");
   } catch (e) {
     console.error("[YUNO] startYunoCheckout error", e);
   } finally {
@@ -620,6 +688,7 @@ async function startYunoCheckout() {
 }
 
 async function handlePayClick(e) {
+  console.log('[YUNO] handlePayClick →', { target: e.target });
   const btn = resolvePayButtonTarget(e);
   if (!btn) return;
 
@@ -656,22 +725,9 @@ async function handlePayClick(e) {
     return;
   }
 
-  // MODAL MODE: Don't disable button on click
-  // The SDK will handle validation inside the modal
-  // Button will be disabled in yunoCreatePayment when payment actually starts
-  // This prevents blocking the user if SDK shows validation error without calling yunoCreatePayment
-  if (state.renderMode === "modal") {
-    // Don't set state.paying or disable button here
-    // Don't show loader here - wait for SDK to validate fields first
-    // Loader will be shown in yunoCreatePayment only if fields are valid
-  } else {
-    // ELEMENT MODE: Disable button immediately
-    // Fields are on the page, so validation is already done
-    state.paying = true;
-    setPayButtonDisabled(true);
-  }
-
   yunoInstance.startPayment();
+  state.paying = true;
+  setPayButtonDisabled(true);
 }
 
 // Prevent Enter key from submitting form/triggering payment
