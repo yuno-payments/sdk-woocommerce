@@ -30,16 +30,9 @@ add_action('plugins_loaded', function () {
   // This filter ensures virtual/downloadable products go to "completed" status
   // Priority 999 ensures it runs AFTER theme/plugin filters (which typically use priority 10)
   add_filter('woocommerce_payment_complete_order_status', function ($status, $order_id, $order) {
-    // Only apply to Yuno payment gateway orders
     if ($order && $order->get_payment_method() === 'yuno_card') {
-      // If order doesn't need shipping (virtual/downloadable), set to completed
-      if (!$order->needs_shipping_address()) {
-        return 'completed';
-      }
-      // If order needs shipping (physical products), keep as processing
-      return 'processing';
+      return $order->needs_shipping_address() ? 'processing' : 'completed';
     }
-    // For other payment gateways, return original status
     return $status;
   }, 999, 3);
 });

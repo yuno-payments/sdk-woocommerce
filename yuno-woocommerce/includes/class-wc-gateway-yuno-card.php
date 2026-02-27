@@ -519,7 +519,6 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       'restBase' => esc_url_raw(rest_url('yuno/v1')),
       'nonce'    => wp_create_nonce('wp_rest'),
 
-      'payForOrder' => true,
       'orderId'   => (int) $order->get_id(),
       'orderKey'  => (string) $order->get_order_key(),
       'currency'  => (string) $order->get_currency(),
