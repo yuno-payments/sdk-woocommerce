@@ -3,6 +3,65 @@ if (!defined('ABSPATH')) exit;
 
 /**
  * =========================
+ * Routes
+ * =========================
+ */
+
+add_action('rest_api_init', function () {
+
+    register_rest_route('yuno/v1', '/public-api-key', [
+        'methods'             => 'GET',
+        'permission_callback' => '__return_true',
+        'callback'            => function () {
+            return yuno_json(['publicApiKey' => yuno_get_env('PUBLIC_API_KEY', '')], 200);
+        },
+    ]);
+
+    register_rest_route('yuno/v1', '/checkout-session', [
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => 'yuno_create_checkout_session',
+    ]);
+
+    register_rest_route('yuno/v1', '/customer', [
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => 'yuno_create_customer_endpoint',
+    ]);
+
+    register_rest_route('yuno/v1', '/confirm', [
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => 'yuno_confirm_order_payment',
+    ]);
+
+    register_rest_route('yuno/v1', '/check-order-status', [
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => 'yuno_check_order_status',
+    ]);
+
+    register_rest_route('yuno/v1', '/duplicate-order', [
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => 'yuno_duplicate_order',
+    ]);
+
+    register_rest_route('yuno/v1', '/update-checkout-session', [
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => 'yuno_update_checkout_session',
+    ]);
+
+    register_rest_route('yuno/v1', '/webhook', [
+        'methods'             => 'POST',
+        'permission_callback' => 'yuno_verify_webhook_signature',
+        'callback'            => 'yuno_handle_webhook',
+    ]);
+});
+
+/**
+ * =========================
  * Helpers
  * =========================
  */
@@ -180,59 +239,6 @@ function yuno_log($level, $message, $context = []) {
     if (!$logger) return;
     $logger->log($level, $message . ' ' . wp_json_encode($context), ['source' => 'yuno']);
 }
-
-/**
- * =========================
- * Routes
- * =========================
- */
-
-add_action('rest_api_init', function () {
-
-    register_rest_route('yuno/v1', '/public-api-key', [
-        'methods'             => 'GET',
-        'permission_callback' => '__return_true',
-        'callback'            => function () {
-            return yuno_json(['publicApiKey' => yuno_get_env('PUBLIC_API_KEY', '')], 200);
-        },
-    ]);
-
-    register_rest_route('yuno/v1', '/checkout-session', [
-        'methods'             => 'POST',
-        'permission_callback' => '__return_true',
-        'callback'            => 'yuno_create_checkout_session',
-    ]);
-
-    register_rest_route('yuno/v1', '/customer', [
-        'methods'             => 'POST',
-        'permission_callback' => '__return_true',
-        'callback'            => 'yuno_create_customer_endpoint',
-    ]);
-
-    register_rest_route('yuno/v1', '/confirm', [
-        'methods'             => 'POST',
-        'permission_callback' => '__return_true',
-        'callback'            => 'yuno_confirm_order_payment',
-    ]);
-
-    register_rest_route('yuno/v1', '/check-order-status', [
-        'methods'             => 'POST',
-        'permission_callback' => '__return_true',
-        'callback'            => 'yuno_check_order_status',
-    ]);
-
-    register_rest_route('yuno/v1', '/duplicate-order', [
-        'methods'             => 'POST',
-        'permission_callback' => '__return_true',
-        'callback'            => 'yuno_duplicate_order',
-    ]);
-
-    register_rest_route('yuno/v1', '/webhook', [
-        'methods'             => 'POST',
-        'permission_callback' => 'yuno_verify_webhook_signature',
-        'callback'            => 'yuno_handle_webhook',
-    ]);
-});
 
 /**
  * Create a Yuno checkout session for a WooCommerce order
@@ -1582,6 +1588,51 @@ function yuno_duplicate_order(WP_REST_Request $request) {
             'message' => $e->getMessage(),
         ], 500);
     }
+}
+
+/**
+ * Update the stored Yuno checkout session ID for an order
+ *
+ * Called by the frontend when the SDK fires PAYMENT_RETRY with a new checkout session.
+ * The old session can no longer be used for payment verification, so the meta value
+ * must be replaced before the next confirmOrder() call.
+ *
+ * @param WP_REST_Request $request Must include order_id, order_key, and checkout_session
+ * @return WP_REST_Response JSON with ok flag and updated session ID
+ */
+function yuno_update_checkout_session(WP_REST_Request $request) {
+    [$order, $err] = yuno_get_order_from_request($request);
+    if ($err) return $err;
+
+    $params           = (array) $request->get_json_params();
+    $new_session      = isset($params['checkout_session']) ? sanitize_text_field($params['checkout_session']) : '';
+
+    if (empty($new_session)) {
+        return yuno_json(['error' => 'Missing checkout_session'], 400);
+    }
+
+    $old_session = (string) $order->get_meta('_yuno_checkout_session');
+
+    // Mark order as failed
+    if (!$order->is_paid()) {
+        $order->update_status('failed', 'Payment failed by customer with checkout session: ' . $old_session);
+        $order->add_order_note('Yuno webhook: Payment failed by customer, awaiting retry with new checkout session: ' . $new_session . '.');
+    }
+
+    $order->update_meta_data('_yuno_checkout_session', $new_session);
+    $order->save();
+
+    yuno_log('info', '[UPDATE-SESSION] Checkout session updated', [
+        'order_id'    => $order->get_id(),
+        'old_session' => $old_session,
+        'new_session' => $new_session,
+    ]);
+
+    return yuno_json([
+        'ok'              => true,
+        'order_id'        => $order->get_id(),
+        'checkout_session'=> $new_session,
+    ], 200);
 }
 
 /**

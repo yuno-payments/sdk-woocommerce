@@ -130,6 +130,28 @@ async function checkOrderStatus({ orderId, orderKey }) {
   return json;
 }
 
+async function updateCheckoutSession({ orderId, orderKey, checkoutSession }) {
+  const REST_BASE = assertBase();
+
+  const res = await fetch(`${REST_BASE}/update-checkout-session`, {
+    method: 'POST',
+    headers: wpHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      order_id:         orderId,
+      order_key:        orderKey,
+      checkout_session: checkoutSession,
+    }),
+  });
+
+  const json = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(`update-checkout-session failed: ${res.status} ${JSON.stringify(json)}`);
+  }
+
+  return json;
+}
+
 async function duplicateOrder({ orderId, orderKey }) {
   const REST_BASE = assertBase();
 
@@ -159,4 +181,5 @@ window.YUNO_API = {
   confirmOrder,
   checkOrderStatus,
   duplicateOrder,
+  updateCheckoutSession,
 };

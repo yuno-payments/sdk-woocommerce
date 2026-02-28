@@ -37,6 +37,7 @@
     confirmOrder,
     checkOrderStatus,
     duplicateOrder,
+    updateCheckoutSession,
   } = window.YUNO_API;
 
   let yunoInstance = null;
@@ -91,6 +92,29 @@
     btn.style.opacity = disabled ? "0.5" : "1";
     btn.style.cursor = disabled ? "not-allowed" : "pointer";
     btn.style.backgroundColor = disabled ? "#666666" : "#000000";
+  }
+
+  function showProcessingOverlay() {
+    if (document.getElementById("yuno-processing-overlay")) return;
+
+    const overlay = document.createElement("div");
+    overlay.id = "yuno-processing-overlay";
+    overlay.className = "yuno-processing-overlay";
+    overlay.innerHTML = `
+      <div class="yuno-processing-content">
+        <p class="yuno-processing-title">One moment, please...</p>
+        <p class="yuno-processing-subtitle">We are processing your payment</p>
+        <div class="yuno-processing-bar-track">
+          <div class="yuno-processing-bar-fill"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  function hideProcessingOverlay() {
+    const overlay = document.getElementById("yuno-processing-overlay");
+    if (overlay) overlay.remove();
   }
 
   function initPayButtonHoverEffects() {
@@ -151,6 +175,7 @@
    */
   async function runPreflightChecks() {
     try {
+      console.log('state.orderKey', state.orderKey);
       const statusRes = await checkOrderStatus({
         orderId: state.orderId,
         orderKey: state.orderKey,
@@ -183,7 +208,7 @@
 
           if (duplicateRes?.ok && duplicateRes?.new_order_id) {
             console.log("[YUNO] New order created:", duplicateRes.new_order_id);
-            window.location.href = duplicateRes.pay_url;
+            // window.location.href = duplicateRes.pay_url;
             return false;
           }
         } catch (e) {
@@ -265,31 +290,40 @@
         showLoading: true, // Disable SDK loader to prevent "One moment please" flash
         issuersFormEnable: true,
         showPaymentStatus: true,
-        onLoading: async ({ isLoading, type }) => {
-          console.log("[YUNO] onLoading →", { isLoading, type });
+        onLoading: async ({ isLoading, type, data }) => {
+          console.log("[YUNO] onLoading →", { isLoading, type, data });
 
-          // PAYMENT_RETRY: SDK signals that payment failed and a retry is needed.
-          // Duplicate the order first to avoid inconsistent WooCommerce statuses.
+          // PAYMENT_RETRY: SDK signals that payment failed and provides a new checkout session.
+          // Update the stored session so subsequent confirmOrder() calls use the correct session.
           if (type === 'PAYMENT_RETRY') {
+            hideProcessingOverlay();
             setPayButtonDisabled(true);
-            try {
-              const duplicateRes = await duplicateOrder({
-                orderId: state.orderId,
-                orderKey: state.orderKey,
-              });
-              if (duplicateRes?.ok && duplicateRes?.new_order_id) {
-                console.log("[YUNO] PAYMENT_RETRY — new order created:", duplicateRes.new_order_id);
-                window.location.href = duplicateRes.pay_url;
-                return;
+            const newCheckoutSession = data?.newCheckoutSession;
+            if (newCheckoutSession) {
+              try {
+                await updateCheckoutSession({
+                  orderId: state.orderId,
+                  orderKey: state.orderKey,
+                  checkoutSession: newCheckoutSession,
+                });
+                console.log("[YUNO] PAYMENT_RETRY — checkout session updated:", newCheckoutSession);
+              } catch (e) {
+                console.error("[YUNO] PAYMENT_RETRY — failed to update checkout session", e);
+              } finally {
+                setPayButtonDisabled(false);
               }
-            } catch (e) {
-              console.error("[YUNO] PAYMENT_RETRY — failed to duplicate order", e);
             }
             return;
           }
 
-          if (isLoading || type === 'ONE_TIME_TOKEN' || type === 'CREATE_PAYMENT') {
+          if (isLoading && (type === 'ONE_TIME_TOKEN' || type === 'CREATE_PAYMENT')) {
             setPayButtonDisabled(true);
+            showProcessingOverlay();
+          } else if (!isLoading && (type === 'ONE_TIME_TOKEN' || type === 'CREATE_PAYMENT')) {
+            hideProcessingOverlay();
+          } else if (isLoading) {
+            setPayButtonDisabled(true);
+            hideProcessingOverlay();
           } else {
             setPayButtonDisabled(false);
           }
@@ -336,8 +370,9 @@
           console.log("[YUNO] yunoPaymentResult →", paymentStatus);
 
           // ── PENDING (3DS / async flow in progress) ─────────────────────────
-          // Do NOT show the full-page overlay — the 3DS modal must remain visible.
+          // Hide overlay so the 3DS modal remains visible and interactable.
           if (PENDING_STATUSES.includes(paymentStatus)) {
+            hideProcessingOverlay();
             console.log("[YUNO] Payment PENDING — staying on page for 3DS/authentication flow...");
             try {
               const confirmRes = await confirmOrder({
@@ -360,47 +395,9 @@
             return;
           }
 
-          // Show full-page loader for SUCCESS and FAILURE statuses
-          document.body.innerHTML = `
-            <div style="
-              position: fixed;
-              top: 0;
-              left: 0;
-              width: 100%;
-              height: 100%;
-              background: #f7f7f7;
-              z-index: 9999;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            ">
-              <div style="text-align: center;">
-                <div style="
-                  border: 4px solid #f3f3f3;
-                  border-top: 4px solid #000;
-                  border-radius: 50%;
-                  width: 48px;
-                  height: 48px;
-                  animation: spin 1s linear infinite;
-                  margin: 0 auto 24px;
-                "></div>
-                <div style="font-size: 18px; font-weight: 600; color: #000; margin-bottom: 8px;">
-                  Processing payment...
-                </div>
-                <div style="font-size: 14px; color: #666;">
-                  Please wait
-                </div>
-              </div>
-            </div>
-            <style>
-              @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-              }
-            </style>
-            <div id="yuno-checkout"></div>
-          `;
+          // Ensure overlay is showing (covers edge case where yunoPaymentResult
+          // fires without a prior onLoading ONE_TIME_TOKEN/CREATE_PAYMENT event)
+          showProcessingOverlay();
 
           // ── SUCCESS (SUCCEEDED or VERIFIED) ────────────────────────────────
           if (SUCCESS_STATUSES.includes(paymentStatus)) {
@@ -433,7 +430,7 @@
                   });
                   if (duplicateRes?.ok && duplicateRes?.new_order_id) {
                     console.log("[YUNO] New order created:", duplicateRes.new_order_id);
-                    window.location.href = duplicateRes.pay_url;
+                    // window.location.href = duplicateRes.pay_url;
                     return;
                   }
                 } catch (e) {
@@ -468,7 +465,7 @@
                 });
                 if (duplicateRes?.ok && duplicateRes?.new_order_id) {
                   console.log("[YUNO] New order created:", duplicateRes.new_order_id);
-                  window.location.href = duplicateRes.pay_url;
+                  // window.location.href = duplicateRes.pay_url;
                   return;
                 }
               } catch (e) {
@@ -493,6 +490,8 @@
             timestamp: new Date().toISOString()
           });
 
+          hideProcessingOverlay();
+
           // Handle 3DS modal cancellation (user closed modal without completing)
           // When user closes 3DS modal, page is stuck on "Processing payment..." loader
           // Solution: Create new order and redirect (same as payment failure flow)
@@ -505,7 +504,7 @@
 
               if (duplicateRes?.ok && duplicateRes?.new_order_id) {
                 console.log("[YUNO] New order created after cancellation:", duplicateRes.new_order_id);
-                window.location.href = duplicateRes.pay_url;
+                // window.location.href = duplicateRes.pay_url;
                 return;
               }
             } catch (e) {
