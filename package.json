@@ -17,5 +17,8 @@
   "type": "commonjs",
   "devDependencies": {
     "@wordpress/env": "^10.37.0"
+  },
+  "overrides": {
+    "minimatch": ">=10.2.1"
   }
 }
