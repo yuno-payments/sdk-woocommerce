@@ -1097,12 +1097,13 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
             }
 
             yuno_log('info', 'Confirm: order product analysis BEFORE payment_complete()', [
-                'order_id'       => $order->get_id(),
-                'needs_shipping' => $order->needs_shipping_address() ? 'YES' : 'NO',
+                'order_id'         => $order->get_id(),
+                'needs_shipping'   => $order->needs_shipping_address() ? 'YES' : 'NO',
+                'needs_processing' => $order->needs_processing() ? 'YES' : 'NO',
                 'has_downloadable' => $order->has_downloadable_item() ? 'YES' : 'NO',
-                'products'       => $order_items_debug,
-                'current_status' => $order->get_status(),
-                'active_filters' => $active_filters ?: 'NONE',
+                'products'         => $order_items_debug,
+                'current_status'   => $order->get_status(),
+                'active_filters'   => $active_filters ?: 'NONE',
             ]);
         }
 
@@ -1115,12 +1116,21 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         if (yuno_debug_enabled()) {
             $status_after_payment_complete = $order->get_status();
 
+            $has_physical = false;
+            foreach ($order->get_items() as $item) {
+                $product = $item->get_product();
+                if ($product && $product->needs_shipping()) {
+                    $has_physical = true;
+                    break;
+                }
+            }
+
             yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete()', [
                 'order_id'                      => $order->get_id(),
                 'session_id'                    => $checkout_session,
                 'status_after_payment_complete' => $status_after_payment_complete,
-                'needs_shipping'                => $order->needs_shipping_address() ? 'YES' : 'NO',
-                'expected'                      => $order->needs_shipping_address() ? 'processing' : 'completed',
+                'has_physical'                  => $has_physical ? 'YES' : 'NO',
+                'expected'                      => $has_physical ? 'processing' : 'completed',
             ]);
         }
 

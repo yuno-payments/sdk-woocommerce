@@ -26,12 +26,32 @@ add_action('plugins_loaded', function () {
     return $gateways;
   });
 
-  // Fix WooCommerce theme filter that forces all orders to "processing"
-  // This filter ensures virtual/downloadable products go to "completed" status
-  // Priority 999 ensures it runs AFTER theme/plugin filters (which typically use priority 10)
+  // Determine post-payment order status: physical → "processing", all-virtual → "completed"
+  // Uses per-product needs_shipping() instead of order-level needs_processing()
+  // (needs_processing requires virtual AND downloadable; needs_shipping only checks virtual)
+  // Priority 999 runs AFTER theme/plugin filters that may force incorrect status
   add_filter('woocommerce_payment_complete_order_status', function ($status, $order_id, $order) {
     if ($order && $order->get_payment_method() === 'yuno_card') {
-      return $order->needs_shipping_address() ? 'processing' : 'completed';
+      $has_physical = false;
+      foreach ($order->get_items() as $item) {
+        $product = $item->get_product();
+        if ($product && $product->needs_shipping()) {
+          $has_physical = true;
+          break;
+        }
+      }
+      $result = $has_physical ? 'processing' : 'completed';
+
+      if (function_exists('yuno_log')) {
+        yuno_log('info', 'Order status filter applied', [
+          'order_id'      => $order_id,
+          'has_physical'  => $has_physical ? 'YES' : 'NO',
+          'input_status'  => $status,
+          'output_status' => $result,
+        ]);
+      }
+
+      return $result;
     }
     return $status;
   }, 999, 3);
