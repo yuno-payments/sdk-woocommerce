@@ -10,6 +10,33 @@ if (!defined('ABSPATH')) exit;
 // Define plugin version constant for asset versioning
 define('YUNO_WC_VERSION', '0.5.2');
 
+// Declare block checkout compatibility
+add_action('before_woocommerce_init', function () {
+    if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility(
+            'cart_checkout_blocks',
+            __FILE__,
+            true
+        );
+    }
+});
+
+// Register block checkout payment method
+add_action('woocommerce_blocks_loaded', function () {
+    if (!class_exists('Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType')) {
+        return;
+    }
+
+    require_once plugin_dir_path(__FILE__) . 'includes/class-wc-gateway-yuno-blocks.php';
+
+    add_action(
+        'woocommerce_blocks_payment_method_type_registration',
+        function ($registry) {
+            $registry->register(new WC_Gateway_Yuno_Blocks_Support());
+        }
+    );
+});
+
 // Ensure WooCommerce is active
 add_action('plugins_loaded', function () {
   if (!class_exists('WooCommerce')) {

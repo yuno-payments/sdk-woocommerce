@@ -17,6 +17,9 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $title = $this->get_option('title', 'Yuno');
     $this->title = (is_string($title) && $title !== '') ? $title : 'Yuno';
 
+    $description = $this->get_option('description', 'Pay with Visa, Mastercard, and more. Secure payment powered by Yuno.');
+    $this->description = (is_string($description) && $description !== '') ? $description : '';
+
     $enabled = $this->get_option('enabled', 'no');
     $this->enabled = ($enabled === 'yes') ? 'yes' : 'no';
 
@@ -165,6 +168,13 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
         'type'        => 'text',
         'description' => 'Name the user will see at checkout.',
         'default'     => 'Yuno Card',
+        'desc_tip'    => true,
+      ],
+      'description' => [
+        'title'       => 'Checkout Description',
+        'type'        => 'textarea',
+        'description' => 'Description shown below the payment method name at checkout.',
+        'default'     => 'Pay with Visa, Mastercard, and more. Secure payment powered by Yuno.',
         'desc_tip'    => true,
       ],
       'account_id' => [

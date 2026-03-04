@@ -423,19 +423,9 @@
               }
 
               if (confirmRes?.failed) {
-                try {
-                  const duplicateRes = await duplicateOrder({
-                    orderId: state.orderId,
-                    orderKey: state.orderKey,
-                  });
-                  if (duplicateRes?.ok && duplicateRes?.new_order_id) {
-                    console.log("[YUNO] New order created:", duplicateRes.new_order_id);
-                    // window.location.href = duplicateRes.pay_url;
-                    return;
-                  }
-                } catch (e) {
-                  console.error("[YUNO] Failed to create new order", e);
-                }
+                console.warn("[YUNO] SDK reported SUCCESS but backend verification says FAILED. Hiding overlay — SDK retry mechanism will handle recovery.");
+                hideProcessingOverlay();
+                setPayButtonDisabled(false);
                 return;
               }
             } catch (e) {
@@ -447,34 +437,16 @@
           // ── FAILURE (REJECTED, DECLINED, CANCELED, ERROR, EXPIRED) ─────────
           if (FAILURE_STATUSES.includes(paymentStatus)) {
             try {
-              // Notify backend so it can mark the order as failed
-              try {
-                await confirmOrder({
-                  orderId: state.orderId,
-                  orderKey: state.orderKey,
-                  paymentStatus,
-                });
-              } catch (e) {
-                console.warn("[YUNO] confirmOrder error (FAILURE, continuing with duplicate)", e);
-              }
-
-              try {
-                const duplicateRes = await duplicateOrder({
-                  orderId: state.orderId,
-                  orderKey: state.orderKey,
-                });
-                if (duplicateRes?.ok && duplicateRes?.new_order_id) {
-                  console.log("[YUNO] New order created:", duplicateRes.new_order_id);
-                  // window.location.href = duplicateRes.pay_url;
-                  return;
-                }
-              } catch (e) {
-                console.error("[YUNO] Failed to create new order", e);
-              }
-
+              await confirmOrder({
+                orderId: state.orderId,
+                orderKey: state.orderKey,
+                paymentStatus,
+              });
             } catch (e) {
-              console.error("[YUNO] Error handling FAILURE status", e);
+              console.warn("[YUNO] confirmOrder error (FAILURE)", e);
             }
+            hideProcessingOverlay();
+            setPayButtonDisabled(false);
             return;
           }
 
@@ -493,26 +465,11 @@
           hideProcessingOverlay();
 
           // Handle 3DS modal cancellation (user closed modal without completing)
-          // When user closes 3DS modal, page is stuck on "Processing payment..." loader
-          // Solution: Create new order and redirect (same as payment failure flow)
+          // SDK treats this as a failure and fires PAYMENT_RETRY with a new checkout session
           if (error === 'CANCELED_BY_USER') {
-            try {
-              const duplicateRes = await duplicateOrder({
-                orderId: state.orderId,
-                orderKey: state.orderKey,
-              });
-
-              if (duplicateRes?.ok && duplicateRes?.new_order_id) {
-                console.log("[YUNO] New order created after cancellation:", duplicateRes.new_order_id);
-                // window.location.href = duplicateRes.pay_url;
-                return;
-              }
-            } catch (e) {
-              console.error("[YUNO] Failed to create new order after cancellation", e);
-              // Fallback: reload page to restore payment form
-              window.location.reload();
-              return;
-            }
+            console.log("[YUNO] 3DS canceled by user — waiting for SDK PAYMENT_RETRY to handle recovery.");
+            setPayButtonDisabled(false);
+            return;
           }
 
           console.log("[YUNO] hideLoader (yunoError)");

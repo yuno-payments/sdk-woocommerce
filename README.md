@@ -15,6 +15,7 @@ This plugin uses the **Yuno Web SDK** and an intermediate layer in WordPress (RE
 ## ✨ Features
 
 - 💳 **Multiple payment methods** via Yuno SDK (cards, wallets, local methods)
+- 🧱 **Block checkout support** — works with WooCommerce block-based checkout (default since WC 8.3)
 - 🔐 **Secure configuration** via WordPress Admin UI
 - ⚙️ **Full REST API integration** with WordPress
 - 🔔 **Webhook support** for real-time payment updates
@@ -24,6 +25,7 @@ This plugin uses the **Yuno Web SDK** and an intermediate layer in WordPress (RE
 - 👤 **Per-order customer creation** for clean payment isolation
 - 📦 **Virtual/Downloadable products** auto-complete to `completed` status
 - 🔄 **3DS/Authentication flow** handling with proper status management
+- 💰 **Marketplace split payments** with percent or fixed commission
 - 🐛 **Comprehensive debug logging** option
 - 🔒 **HMAC webhook verification** for security
 
@@ -56,16 +58,25 @@ WordPress REST API (rest-api.php)
 ```
 yuno-woocommerce/
 │
+├── package.json                  # Build tooling (@wordpress/scripts)
+├── webpack.config.js             # Custom webpack config (WC externals)
+├── src/
+│   └── blocks/
+│       └── yuno-blocks.js        # Block checkout React source
 ├── assets/
 │   ├── css/
-│   │   └── checkout.css         # Checkout page styles
+│   │   └── checkout.css          # Checkout page styles
 │   └── js/
-│       ├── api.js              # REST calls to WordPress
-│       └── checkout.js         # Yuno SDK initialization & UI
+│       ├── api.js                # REST calls to WordPress
+│       ├── checkout.js           # Yuno SDK initialization & UI
+│       └── blocks/               # Compiled block checkout output
+│           ├── yuno-blocks.js        # Compiled React (committed)
+│           └── yuno-blocks.asset.php # Dependency manifest (committed)
 │
 ├── includes/
-│   ├── class-wc-gateway-yuno-card.php  # WooCommerce Gateway class
-│   └── rest-api.php            # REST endpoints & webhook handling
+│   ├── class-wc-gateway-yuno-card.php    # WooCommerce Gateway class
+│   ├── class-wc-gateway-yuno-blocks.php  # Block checkout integration
+│   └── rest-api.php                      # REST endpoints & webhook handling
 │
 └── yuno-woocommerce.php          # Plugin bootstrap
 ```
@@ -314,10 +325,34 @@ WooCommerce → Status → Logs → Select "yuno-{date}.log"
 
 ---
 
+## 🧱 Block Checkout Support
+
+The plugin supports both the **legacy shortcode checkout** and the **WooCommerce block-based checkout** (default since WC 8.3+).
+
+Both checkout types use the same redirect-to-order-pay approach — WooCommerce calls `process_payment()`, which redirects the user to the order-pay page where the Yuno SDK handles payment.
+
+### Building Block Checkout Assets
+
+Compiled assets are committed to the repo, so **no build step is needed for production**. Only rebuild if you modify `src/blocks/yuno-blocks.js`:
+
+```bash
+cd yuno-woocommerce
+npm install              # First time only
+npm run build            # Production build
+npm run start            # Development watch mode
+```
+
+### Compatibility
+
+- **WooCommerce 8.0+:** Block checkout supported
+- **WooCommerce < 8.0:** Block code silently skipped, legacy checkout works as before
+- The plugin declares `cart_checkout_blocks` compatibility via `FeaturesUtil`
+
+---
+
 ## ⚠️ Current Limitations
 
 - Single currency per order (uses WooCommerce order currency)
-- No split payments support yet
 - No installments UI (SDK handles if available)
 
 ---
@@ -327,7 +362,6 @@ WooCommerce → Status → Logs → Select "yuno-{date}.log"
 - [ ] Add support for multiple payment methods (PSE, cash, etc.)
 - [ ] Implement order cancellation via Yuno API
 - [ ] Add refund support via WooCommerce admin
-- [ ] Support split payments configuration
 - [ ] Add installments selection UI
 - [ ] Multi-currency support with conversion rates
 - [ ] Advanced fraud detection rules
@@ -337,9 +371,10 @@ WooCommerce → Status → Logs → Select "yuno-{date}.log"
 
 ## 📋 Requirements
 
-- WordPress 5.0+
-- WooCommerce 5.0+
+- WordPress 6.4+
+- WooCommerce 8.0+ (block checkout requires 8.0+; legacy checkout works on 5.0+)
 - PHP 8.0+
+- Node.js (only for development/rebuilding block checkout assets)
 - Yuno merchant account with API credentials
 - HTTPS enabled (required for production)
 
@@ -399,6 +434,14 @@ ISC
 ---
 
 ## 📝 Changelog
+
+### v0.5.2
+- ✅ **WooCommerce block-based checkout support** (default since WC 8.3)
+- ✅ `AbstractPaymentMethodType` integration with redirect-to-order-pay flow
+- ✅ `@wordpress/scripts` build pipeline for React block component
+- ✅ `cart_checkout_blocks` feature compatibility declaration
+- ✅ Marketplace split payments (percent-based and fixed commission)
+- ✅ Graceful degradation on WC < 8.0 (block code silently skipped)
 
 ### v0.5.0
 - ✅ Per-order customer creation strategy

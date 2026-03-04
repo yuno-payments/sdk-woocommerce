@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+yuno-woocommerce/node_modules/
 
 # WordPress generated files
 wp-content/

@@ -38,13 +38,22 @@ sdk-woocommerce/
 ├── package.json                          # npm scripts for wp-env
 ├── yuno-woocommerce/
 │   ├── yuno-woocommerce.php              # Plugin bootstrap (entry point)
+│   ├── package.json                      # Build tooling (@wordpress/scripts)
+│   ├── webpack.config.js                 # Custom webpack config (WC externals)
 │   ├── includes/
 │   │   ├── class-wc-gateway-yuno-card.php  # WC_Payment_Gateway subclass
+│   │   ├── class-wc-gateway-yuno-blocks.php # AbstractPaymentMethodType (block checkout)
 │   │   └── rest-api.php                    # All REST endpoints + webhook (~2400 lines)
+│   ├── src/
+│   │   └── blocks/
+│   │       └── yuno-blocks.js            # Block checkout React source
 │   └── assets/
 │       ├── js/
 │       │   ├── api.js                    # Frontend REST bridge (fetch wrappers)
-│       │   └── checkout.js               # SDK orchestration + payment state machine
+│       │   ├── checkout.js               # SDK orchestration + payment state machine
+│       │   └── blocks/                   # Compiled block checkout output
+│       │       ├── yuno-blocks.js        # GENERATED — compiled React
+│       │       └── yuno-blocks.asset.php # GENERATED — dependency manifest
 │       └── css/
 │           └── checkout.css              # Theme isolation + SDK container styles
 ```
@@ -96,12 +105,14 @@ Yuno API (https://api[-env].y.uno)
 
 | File | Responsibility |
 |------|---------------|
-| `yuno-woocommerce.php` | Registers gateway via `woocommerce_payment_gateways`, virtual-product status filter |
+| `yuno-woocommerce.php` | Registers gateway via `woocommerce_payment_gateways`, virtual-product status filter, block checkout registration, `cart_checkout_blocks` compatibility declaration |
 | `class-wc-gateway-yuno-card.php` | Admin settings UI, script enqueuing, `process_payment()`, `receipt_page()`, split config validation |
+| `class-wc-gateway-yuno-blocks.php` | `AbstractPaymentMethodType` — registers Yuno with WC Blocks payment method registry |
 | `rest-api.php` | REST routes, customer creation, checkout session, confirm, webhook handling |
 | `api.js` | `getPublicApiKey`, `getCheckoutSession`, `createCustomer`, `confirmOrder`, `checkOrderStatus`, `duplicateOrder` |
 | `checkout.js` | `startYunoCheckout()`, `runPreflightChecks()`, `yunoPaymentResult()`, `handlePayClick()` |
 | `checkout.css` | Theme style resets for `#yuno-root`, `#yuno-apm-form`, `#yuno-action-form` |
+| `src/blocks/yuno-blocks.js` | React component source for block checkout (compiled to `assets/js/blocks/`) |
 
 ---
 
@@ -269,7 +280,60 @@ In local dev, logs also appear in the Docker container at `wp-content/debug.log`
 
 ---
 
+## Block Checkout Support
+
+The plugin supports both **legacy shortcode checkout** and **WooCommerce block-based checkout** (default since WC 8.3).
+
+### How It Works
+
+Block checkout uses a redirect-to-order-pay approach: WC Blocks calls the same `process_payment()` method as legacy checkout, which returns a redirect to the order-pay page where the existing SDK orchestration handles payment.
+
+```
+Block Checkout → process_payment() → redirect → Order-Pay Page → SDK → Thank You
+Legacy Checkout → process_payment() → redirect → Order-Pay Page → SDK → Thank You
+```
+
+Both flows converge at the order-pay page — no duplicate payment logic.
+
+### Key Components
+
+- **`class-wc-gateway-yuno-blocks.php`** — `AbstractPaymentMethodType` implementation. Methods: `initialize()`, `is_active()`, `get_payment_method_script_handles()`, `get_payment_method_data()`.
+- **`src/blocks/yuno-blocks.js`** — React component that calls `registerPaymentMethod()`. Registers `onPaymentSetup` returning SUCCESS with empty `paymentMethodData` (WC Blocks handles the redirect).
+- **Settings data key** — `getSetting('yuno_card_data')` (derived from `protected $name = 'yuno_card'`).
+
+### Registration Flow
+
+1. `before_woocommerce_init` → `FeaturesUtil::declare_compatibility('cart_checkout_blocks', __FILE__, true)`
+2. `woocommerce_blocks_loaded` → guard `class_exists(AbstractPaymentMethodType)` → load `class-wc-gateway-yuno-blocks.php`
+3. `woocommerce_blocks_payment_method_type_registration` → `$registry->register(new WC_Gateway_Yuno_Blocks_Support())`
+
+### Build Tooling
+
+Block checkout requires a build step to compile the React source:
+
+```bash
+cd yuno-woocommerce
+npm install              # First time only
+npm run build            # Production build (minified)
+npm run start            # Development watch mode
+```
+
+- **Build tool:** `@wordpress/scripts` with custom `webpack.config.js` for WooCommerce externals
+- **Source:** `src/blocks/yuno-blocks.js`
+- **Output:** `assets/js/blocks/yuno-blocks.js` + `assets/js/blocks/yuno-blocks.asset.php`
+- **Compiled assets are committed** to the repo — production works without a build step
+- **Existing assets unchanged** — `api.js`, `checkout.js`, `checkout.css` are not part of the build pipeline
+
+### Backward Compatibility
+
+- All block-related code is guarded by `class_exists()` checks
+- On WC < 8.0 (no blocks API), the block code is silently skipped — legacy checkout works as before
+- No modifications to existing gateway class, REST API, or JS/CSS
+
+---
+
 ## External Dependencies
 
 - **Yuno Web SDK:** `https://sdk-web.y.uno/v1.5/main.js` (loaded via `wp_enqueue_script`)
 - **@wordpress/env:** v10.37.0 (dev dependency, used only for local Docker environment)
+- **@wordpress/scripts:** ^28.0.0 (dev dependency in `yuno-woocommerce/`, used to compile block checkout React code)
