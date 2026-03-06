@@ -10,9 +10,9 @@ final class WC_Gateway_Yuno_Blocks_Support extends AbstractPaymentMethodType {
     private $gateway;
 
     public function initialize() {
-        $this->settings = get_option('woocommerce_yuno_card_settings', []);
+        $this->settings = get_option('woocommerce_' . YUNO_GATEWAY_ID . '_settings', []);
         $gateways       = WC()->payment_gateways->payment_gateways();
-        $this->gateway  = isset($gateways['yuno_card']) ? $gateways['yuno_card'] : null;
+        $this->gateway  = isset($gateways[YUNO_GATEWAY_ID]) ? $gateways[YUNO_GATEWAY_ID] : null;
     }
 
     public function is_active() {
@@ -38,7 +38,7 @@ final class WC_Gateway_Yuno_Blocks_Support extends AbstractPaymentMethodType {
     }
 
     public function get_payment_method_data() {
-        $default_description = 'Pay with Visa, Mastercard, and more. Secure payment powered by Yuno.';
+        $default_description = 'Select your preferred payment method on the next step';
         $plugin_url = plugin_dir_url(__DIR__);
 
         return [

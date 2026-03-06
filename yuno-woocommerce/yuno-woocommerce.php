@@ -9,6 +9,11 @@ if (!defined('ABSPATH')) exit;
 
 // Define plugin version constant for asset versioning
 define('YUNO_WC_VERSION', '0.5.2');
+define('YUNO_GATEWAY_ID', 'yuno_card');
+define('YUNO_STATUS_SUCCESS', ['SUCCEEDED', 'VERIFIED', 'APPROVED', 'PAYED']);
+define('YUNO_STATUS_FAILURE', ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED']);
+define('YUNO_STATUS_PENDING', ['PENDING', 'PROCESSING', 'REQUIRES_ACTION']);
+define('YUNO_DEFAULT_COUNTRY', 'CO');
 
 // Declare block checkout compatibility
 add_action('before_woocommerce_init', function () {
@@ -53,16 +58,16 @@ add_action('plugins_loaded', function () {
     return $gateways;
   });
 
-  // Determine post-payment order status: physical → "processing", all-virtual → "completed"
-  // Uses per-product needs_shipping() instead of order-level needs_processing()
-  // (needs_processing requires virtual AND downloadable; needs_shipping only checks virtual)
+  // Determine post-payment order status: physical → "processing", non-physical → "completed"
+  // A product is considered physical only if it needs shipping AND is not downloadable.
+  // Downloadable-only products (even if not marked virtual) go straight to "completed".
   // Priority 999 runs AFTER theme/plugin filters that may force incorrect status
   add_filter('woocommerce_payment_complete_order_status', function ($status, $order_id, $order) {
-    if ($order && $order->get_payment_method() === 'yuno_card') {
+    if ($order && $order->get_payment_method() === YUNO_GATEWAY_ID) {
       $has_physical = false;
       foreach ($order->get_items() as $item) {
         $product = $item->get_product();
-        if ($product && $product->needs_shipping()) {
+        if ($product && $product->needs_shipping() && !$product->is_downloadable()) {
           $has_physical = true;
           break;
         }

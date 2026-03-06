@@ -67,40 +67,43 @@ add_action('rest_api_init', function () {
  */
 
 function yuno_get_env($key, $default = '') {
-    $settings = get_option('woocommerce_yuno_card_settings', []);
-    if (is_array($settings)) {
-        $map = [
-            'ACCOUNT_ID'             => 'account_id',
-            'PUBLIC_API_KEY'         => 'public_api_key',
-            'PRIVATE_SECRET_KEY'     => 'private_secret_key',
-            'DEBUG'                  => 'debug',
+    static $settings = null;
+    static $map = [
+        'ACCOUNT_ID'               => 'account_id',
+        'PUBLIC_API_KEY'           => 'public_api_key',
+        'PRIVATE_SECRET_KEY'       => 'private_secret_key',
+        'DEBUG'                    => 'debug',
+        'SPLIT_ENABLED'            => 'split_enabled',
+        'YUNO_RECIPIENT_ID'        => 'yuno_recipient_id',
+        'SPLIT_FIXED_AMOUNT'       => 'split_fixed_amount',
+        'SPLIT_COMMISSION_PERCENT' => 'split_commission_percent',
+        'WEBHOOK_HMAC_SECRET'      => 'webhook_hmac_secret',
+        'WEBHOOK_API_KEY'          => 'webhook_api_key',
+        'WEBHOOK_X_SECRET'         => 'webhook_x_secret',
+    ];
 
-            'SPLIT_ENABLED'          => 'split_enabled',
-            'YUNO_RECIPIENT_ID'      => 'yuno_recipient_id',
-            'SPLIT_FIXED_AMOUNT'     => 'split_fixed_amount',
-            'SPLIT_COMMISSION_PERCENT' => 'split_commission_percent',
+    if ($settings === null) {
+        $settings = get_option('woocommerce_' . YUNO_GATEWAY_ID . '_settings', []);
+        if (!is_array($settings)) $settings = [];
+    }
 
-            'WEBHOOK_HMAC_SECRET'    => 'webhook_hmac_secret',
-            'WEBHOOK_API_KEY'        => 'webhook_api_key',
-            'WEBHOOK_X_SECRET'       => 'webhook_x_secret',
-        ];
-
-        if (isset($map[$key])) {
-            $k = $map[$key];
-            if (array_key_exists($k, $settings) && $settings[$k] !== '') return $settings[$k];
+    if (isset($map[$key])) {
+        $option_key = $map[$key];
+        if (array_key_exists($option_key, $settings) && $settings[$option_key] !== '') {
+            return $settings[$option_key];
         }
     }
 
-    $v = getenv($key);
-    if ($v !== false && $v !== null && $v !== '') return $v;
+    $env_value = getenv($key);
+    if ($env_value !== false && $env_value !== null && $env_value !== '') return $env_value;
 
     if (defined($key) && constant($key) !== '') return constant($key);
 
     return $default;
 }
 
-function yuno_api_url_from_public_key($publicKey) {
-    $prefix = explode('_', (string)$publicKey)[0] ?? '';
+function yuno_api_url_from_public_key($public_api_key) {
+    $prefix = explode('_', (string)$public_api_key)[0] ?? '';
     $map = [
         'dev'     => '-dev',
         'staging' => '-staging',
@@ -149,13 +152,47 @@ function yuno_wp_remote_json($method, $url, $headers = [], $body = null, $timeou
  */
 function yuno_get_wc_price_decimals() {
     if (function_exists('wc_get_price_decimals')) {
-        $d = (int) wc_get_price_decimals();
+        $decimal_places = (int) wc_get_price_decimals();
     } else {
-        $d = (int) get_option('woocommerce_price_num_decimals', 2);
+        $decimal_places = (int) get_option('woocommerce_price_num_decimals', 2);
     }
-    if ($d < 0) $d = 0;
-    if ($d > 6) $d = 6;
-    return $d;
+    if ($decimal_places < 0) $decimal_places = 0;
+    if ($decimal_places > 6) $decimal_places = 6;
+    return $decimal_places;
+}
+
+/**
+ * Build a Yuno-formatted address array from a WooCommerce order.
+ *
+ * @param WC_Order $order      The WooCommerce order
+ * @param string   $type       'billing' or 'shipping'
+ * @param string|null $fallback_type  Optional fallback address type (e.g. 'billing' for shipping fallback)
+ * @return array Yuno-formatted address (may be empty if all fields are empty)
+ */
+function yuno_build_address_from_order($order, $type, $fallback_type = null) {
+    $prefix = ($type === 'shipping') ? 'get_shipping_' : 'get_billing_';
+    $fallback_prefix = $fallback_type ? (($fallback_type === 'shipping') ? 'get_shipping_' : 'get_billing_') : null;
+
+    $fields = [
+        'country'        => 'country',
+        'state'          => 'state',
+        'city'           => 'city',
+        'zip_code'       => 'postcode',
+        'address_line_1' => 'address_1',
+        'address_line_2' => 'address_2',
+    ];
+
+    $address = [];
+    foreach ($fields as $yuno_key => $wc_suffix) {
+        $val = $order->{$prefix . $wc_suffix}();
+        if (empty($val) && $fallback_prefix) {
+            $val = $order->{$fallback_prefix . $wc_suffix}();
+        }
+        if (!empty($val)) {
+            $address[$yuno_key] = $val;
+        }
+    }
+    return $address;
 }
 
 /**
@@ -213,18 +250,23 @@ function yuno_get_order_from_request(WP_REST_Request $request) {
         return [null, yuno_json(['error' => 'Order not found', 'order_id' => $order_id], 404)];
     }
 
-    if ($order_key && method_exists($order, 'get_order_key')) {
-        if ($order->get_order_key() !== $order_key) {
-            return [null, yuno_json(['error' => 'Invalid order_key'], 403)];
-        }
+    if (!$order_key) {
+        return [null, yuno_json(['error' => 'Missing order_key'], 400)];
+    }
+    if (method_exists($order, 'get_order_key') && $order->get_order_key() !== $order_key) {
+        return [null, yuno_json(['error' => 'Invalid order_key'], 403)];
     }
 
     return [$order, null];
 }
 
 function yuno_debug_enabled() {
-    $dbg = (string) yuno_get_env('DEBUG', 'no');
-    return in_array($dbg, ['yes','1','true'], true);
+    static $enabled = null;
+    if ($enabled === null) {
+        $dbg = (string) yuno_get_env('DEBUG', 'no');
+        $enabled = in_array($dbg, ['yes','1','true'], true);
+    }
+    return $enabled;
 }
 
 function yuno_logger() {
@@ -234,7 +276,9 @@ function yuno_logger() {
 }
 
 function yuno_log($level, $message, $context = []) {
-    if (!yuno_debug_enabled()) return;
+    // Always log error/warning levels regardless of debug setting (LOG-1)
+    $always_log = ['emergency', 'alert', 'critical', 'error', 'warning'];
+    if (!yuno_debug_enabled() && !in_array($level, $always_log, true)) return;
     $logger = yuno_logger();
     if (!$logger) return;
     $logger->log($level, $message . ' ' . wp_json_encode($context), ['source' => 'yuno']);
@@ -253,11 +297,11 @@ function yuno_log($level, $message, $context = []) {
  * @return WP_REST_Response JSON with checkout_session, country, and customer_id
  */
 function yuno_create_checkout_session(WP_REST_Request $request) {
-    $accountId = yuno_get_env('ACCOUNT_ID', '');
-    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
-    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
+    $account_id = yuno_get_env('ACCOUNT_ID', '');
+    $public_key = yuno_get_env('PUBLIC_API_KEY', '');
+    $secret_key = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
-    if (!$accountId || !$publicKey || !$secretKey) {
+    if (!$account_id || !$public_key || !$secret_key) {
         return yuno_json(['error' => 'Missing required keys'], 400);
     }
 
@@ -276,21 +320,10 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ], 409);
     }
 
-    //FIX: ALWAYS create new checkout session (never reuse)
-    // Reusing checkout sessions can cause INVALID_CUSTOMER_FOR_TOKEN errors when:
-    // - customer_id in order meta doesn't match customer_id in old checkout session
-    // - This happens after order duplication, customer changes, or retry scenarios
-    // Creating a fresh checkout session ensures customer_id consistency
-    //
-    // Old behavior (REMOVED):
-    // $existingSession = (string) $order->get_meta('_yuno_checkout_session');
-    // if (!empty($existingSession)) {
-    //     return yuno_json(['checkout_session' => $existingSession, ...], 200);
-    // }
+    $api_url = yuno_api_url_from_public_key($public_key);
 
-    $apiUrl = yuno_api_url_from_public_key($publicKey);
-
-    $country      = $order->get_billing_country() ?: 'CO';
+    $billing_country = $order->get_billing_country();
+    $country      = $billing_country ?: YUNO_DEFAULT_COUNTRY;
     $currency     = $order->get_currency() ?: 'COP';
     $total_major  = (float) $order->get_total();
     $decimals     = yuno_get_wc_price_decimals();
@@ -305,7 +338,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
     ]);
 
     $payload = [
-        'account_id'         => $accountId,
+        'account_id'         => $account_id,
         'merchant_order_id'  => 'WC-' . $order->get_id(),
         'merchant_reference' => 'WC-' . $order->get_id(),
         'payment_description'=> 'WooCommerce Order #' . $order->get_id(),
@@ -323,22 +356,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
             'vault_on_success' => false,
         ],
     ];
-
-    $billing_country  = $order->get_billing_country();
-    $billing_state    = $order->get_billing_state();
-    $billing_city     = $order->get_billing_city();
-    $billing_postcode = $order->get_billing_postcode();
-    $billing_address1 = $order->get_billing_address_1();
-    $billing_address2 = $order->get_billing_address_2();
-
-    $billing_address = [];
-    if (!empty($billing_country)) $billing_address['country'] = $billing_country;
-    if (!empty($billing_state)) $billing_address['state'] = $billing_state;
-    if (!empty($billing_city)) $billing_address['city'] = $billing_city;
-    if (!empty($billing_postcode)) $billing_address['zip_code'] = $billing_postcode;
-    if (!empty($billing_address1)) $billing_address['address_line_1'] = $billing_address1;
-    if (!empty($billing_address2)) $billing_address['address_line_2'] = $billing_address2;
-
+    $billing_address = yuno_build_address_from_order($order, 'billing');
     if (!empty($billing_address)) {
         $payload['billing_address'] = $billing_address;
         yuno_log('info', '[CHECKOUT SESSION]Including billing_address', [
@@ -347,21 +365,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         ]);
     }
 
-    $shipping_country  = $order->get_shipping_country() ?: $billing_country;
-    $shipping_state    = $order->get_shipping_state() ?: $billing_state;
-    $shipping_city     = $order->get_shipping_city() ?: $billing_city;
-    $shipping_postcode = $order->get_shipping_postcode() ?: $billing_postcode;
-    $shipping_address1 = $order->get_shipping_address_1() ?: $billing_address1;
-    $shipping_address2 = $order->get_shipping_address_2() ?: $billing_address2;
-
-    $shipping_address = [];
-    if (!empty($shipping_country)) $shipping_address['country'] = $shipping_country;
-    if (!empty($shipping_state)) $shipping_address['state'] = $shipping_state;
-    if (!empty($shipping_city)) $shipping_address['city'] = $shipping_city;
-    if (!empty($shipping_postcode)) $shipping_address['zip_code'] = $shipping_postcode;
-    if (!empty($shipping_address1)) $shipping_address['address_line_1'] = $shipping_address1;
-    if (!empty($shipping_address2)) $shipping_address['address_line_2'] = $shipping_address2;
-
+    $shipping_address = yuno_build_address_from_order($order, 'shipping', 'billing');
     if (!empty($shipping_address)) {
         $payload['shipping_address'] = $shipping_address;
         yuno_log('info', '[CHECKOUT SESSION]Including shipping_address', [
@@ -398,9 +402,9 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
 
     // split_marketplace: moved from /payments endpoint to checkout session
     $split_enabled_setting = (string) yuno_get_env('SPLIT_ENABLED', 'no');
-    $split_enabled         = in_array($split_enabled_setting, ['yes','1','true'], true);
+    $is_split_enabled      = in_array($split_enabled_setting, ['yes','1','true'], true);
 
-    if ($split_enabled) {
+    if ($is_split_enabled) {
         $recipient_id = trim((string) yuno_get_env('YUNO_RECIPIENT_ID', ''));
 
         if ($recipient_id === '') {
@@ -412,7 +416,7 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
         $fixed_minor = ($fixed_raw !== '' && ctype_digit($fixed_raw)) ? (int) $fixed_raw : null;
 
         $commission_amount = 0.0;
-        $decimals_split    = yuno_get_wc_price_decimals();
+        $decimals_split    = $decimals;
 
         if ($pct_raw !== '') {
             $pct = (float) str_replace(',', '.', $pct_raw);
@@ -463,18 +467,21 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
 
     yuno_log('info', '[CHECKOUT SESSION]Final payload before API call', [
         'order_id'             => $order->get_id(),
-        'has_customer_id'      => !empty($customer_id) ? 'YES' : 'NO',
-        'has_additional_data'  => isset($payload['additional_data']) ? 'YES' : 'NO',
-        'has_split_marketplace'=> isset($payload['split_marketplace']) ? 'YES' : 'NO',
-        'payload'              => $payload,
+        'has_customer_id'      => !empty($customer_id),
+        'has_billing_address'  => isset($payload['billing_address']),
+        'has_shipping_address' => isset($payload['shipping_address']),
+        'has_additional_data'  => isset($payload['additional_data']),
+        'has_split_marketplace'=> isset($payload['split_marketplace']),
+        'amount'               => $payload['amount'] ?? null,
+        'country'              => $payload['country'] ?? null,
     ]);
 
     $res = yuno_wp_remote_json(
         'POST',
-        "{$apiUrl}/v1/checkout/sessions",
+        "{$api_url}/v1/checkout/sessions",
         [
-            'public-api-key'     => $publicKey,
-            'private-secret-key' => $secretKey,
+            'public-api-key'     => $public_key,
+            'private-secret-key' => $secret_key,
             'Content-Type'       => 'application/json',
         ],
         $payload,
@@ -525,10 +532,10 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
                 // Retry checkout session creation with new customer_id
                 $res = yuno_wp_remote_json(
                     'POST',
-                    "{$apiUrl}/v1/checkout/sessions",
+                    "{$api_url}/v1/checkout/sessions",
                     [
-                        'public-api-key'     => $publicKey,
-                        'private-secret-key' => $secretKey,
+                        'public-api-key'     => $public_key,
+                        'private-secret-key' => $secret_key,
                         'Content-Type'       => 'application/json',
                     ],
                     $payload,
@@ -538,15 +545,14 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
                 // If retry also fails, return the error below
                 if (!$res['ok']) {
                     yuno_log('error', '[CHECKOUT SESSION]Retry failed after customer recreation', [
-                        'order_id' => $order->get_id(),
-                        'status'   => $res['status'],
-                        'response' => $res['raw'],
+                        'order_id'    => $order->get_id(),
+                        'http_status' => $res['status'],
+                        'error_code'  => is_array($res['raw']) ? ($res['raw']['code'] ?? null) : null,
                     ]);
 
                     return yuno_json([
                         'error'    => 'Yuno create checkout session failed after retry',
                         'status'   => $res['status'],
-                        'response' => $res['raw'],
                     ], 400);
                 }
 
@@ -562,42 +568,55 @@ function yuno_create_checkout_session(WP_REST_Request $request) {
                 return yuno_json([
                     'error'    => 'Failed to create customer after cache clear',
                     'status'   => $res['status'],
-                    'response' => $res['raw'],
                 ], 400);
             }
         } else {
             yuno_log('error', '[CHECKOUT SESSION]API call failed', [
-                'order_id' => $order->get_id(),
-                'status'   => $res['status'],
-                'response' => $res['raw'],
+                'order_id'    => $order->get_id(),
+                'http_status' => $res['status'],
+                'error_code'  => is_array($res['raw']) ? ($res['raw']['code'] ?? null) : null,
             ]);
             return yuno_json([
                 'error'    => 'Yuno create checkout session failed',
                 'status'   => $res['status'],
-                'response' => $res['raw'],
             ], 400);
         }
     }
 
-    $checkoutSession = is_array($res['raw'])
+    $checkout_session_id = is_array($res['raw'])
         ? ($res['raw']['checkout_session'] ?? $res['raw']['id'] ?? null)
         : null;
 
-    if (!$checkoutSession) {
-        return yuno_json(['error' => 'Yuno response missing checkout_session/id', 'response' => $res['raw']], 400);
+    if (!$checkout_session_id) {
+        yuno_log('error', '[CHECKOUT SESSION] Response missing checkout_session/id', [
+            'order_id'    => $order->get_id(),
+            'http_status' => $res['status'],
+            'has_raw'     => !empty($res['raw']),
+        ]);
+        return yuno_json(['error' => 'Yuno response missing checkout_session/id'], 400);
+    }
+
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $checkout_session_id)) {
+        yuno_log('error', '[CHECKOUT SESSION] Invalid session ID format from API', [
+            'order_id' => $order->get_id(),
+            'session'  => $checkout_session_id,
+        ]);
+        return yuno_json(['error' => 'Invalid checkout session format from API'], 400);
     }
 
     yuno_log('info', 'Yuno checkout session response', [
         'order_id'         => $order->get_id(),
-        'checkout_session' => $checkoutSession,
-        'full_response'    => $res['raw'], // May contain available payment_methods
+        'checkout_session' => $checkout_session_id,
+        'country'          => $res['raw']['country'] ?? null,
+        'amount'           => $res['raw']['amount'] ?? null,
+        'currency'         => $res['raw']['currency'] ?? null,
     ]);
 
-    $order->update_meta_data('_yuno_checkout_session', $checkoutSession);
+    $order->update_meta_data('_yuno_checkout_session', $checkout_session_id);
     $order->save();
 
     return yuno_json([
-        'checkout_session' => $checkoutSession,
+        'checkout_session' => $checkout_session_id,
         'country'          => $country,
         'order_id'         => $order->get_id(),
         'reused'           => false,
@@ -653,8 +672,8 @@ function yuno_format_phone_number($phone, $country) {
     // If we don't have a country code mapping, return null (fail gracefully)
     if (!$country_config) {
         yuno_log('warning', '[PHONE]Country code not mapped', [
-            'country' => $country,
-            'phone'   => $phone,
+            'country'    => $country,
+            'phone_last4'=> substr(preg_replace('/[^\d]/', '', $phone), -4),
         ]);
         return null;
     }
@@ -671,8 +690,7 @@ function yuno_format_phone_number($phone, $country) {
             if (strlen($number) < $country_config['min_length']) {
                 yuno_log('warning', '[PHONE]Phone number too short after extracting country code', [
                     'country'      => $country,
-                    'phone'        => $phone,
-                    'number'       => $number,
+                    'phone_last4'  => substr($number, -4),
                     'length'       => strlen($number),
                     'min_required' => $country_config['min_length'],
                 ]);
@@ -685,10 +703,9 @@ function yuno_format_phone_number($phone, $country) {
             ];
 
             yuno_log('info', '[PHONE]Formatted phone from international format', [
-                'original'     => $phone,
                 'country'      => $country,
                 'country_code' => $result['country_code'],
-                'number'       => $result['number'],
+                'phone_last4'  => substr($result['number'], -4),
             ]);
 
             return $result;
@@ -699,7 +716,7 @@ function yuno_format_phone_number($phone, $country) {
     if (strlen($cleaned) < $country_config['min_length']) {
         yuno_log('warning', '[PHONE]Phone number too short', [
             'country'      => $country,
-            'phone'        => $phone,
+            'phone_last4'  => substr($cleaned, -4),
             'length'       => strlen($cleaned),
             'min_required' => $country_config['min_length'],
         ]);
@@ -713,10 +730,9 @@ function yuno_format_phone_number($phone, $country) {
     ];
 
     yuno_log('info', '[PHONE]Formatted phone number', [
-        'original'     => $phone,
         'country'      => $country,
         'country_code' => $result['country_code'],
-        'number'       => $result['number'],
+        'phone_last4'  => substr($result['number'], -4),
     ]);
 
     return $result;
@@ -746,15 +762,15 @@ function yuno_get_or_create_customer($order) {
         return $existing_customer_id;
     }
 
-    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
+    $secret_key = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
-    if (empty($secretKey)) {
+    if (empty($secret_key)) {
         yuno_log('warning', '[CUSTOMER]missing PRIVATE_SECRET_KEY, skipping customer creation');
         return null; // Graceful degradation - continues without customer
     }
 
     yuno_log('info', '[CUSTOMER]PRIVATE_SECRET_KEY found', [
-        'key_length' => strlen($secretKey),
+        'key_length' => strlen($secret_key),
     ]);
 
     $user_id = $order->get_user_id();
@@ -769,19 +785,6 @@ function yuno_get_or_create_customer($order) {
     $billing_phone  = $order->get_billing_phone();
 
     $billing_country  = $order->get_billing_country();
-    $billing_state    = $order->get_billing_state();
-    $billing_city     = $order->get_billing_city();
-    $billing_postcode = $order->get_billing_postcode();
-    $billing_address1 = $order->get_billing_address_1();
-    $billing_address2 = $order->get_billing_address_2();
-
-    // Use shipping address if available, fallback to billing
-    $shipping_country  = $order->get_shipping_country() ?: $billing_country;
-    $shipping_state    = $order->get_shipping_state() ?: $billing_state;
-    $shipping_city     = $order->get_shipping_city() ?: $billing_city;
-    $shipping_postcode = $order->get_shipping_postcode() ?: $billing_postcode;
-    $shipping_address1 = $order->get_shipping_address_1() ?: $billing_address1;
-    $shipping_address2 = $order->get_shipping_address_2() ?: $billing_address2;
 
     //Option A: Always use order ID for merchant_customer_id (unique per order, never reuse)
     $merchant_customer_id = 'woo_order_' . $order->get_id();
@@ -825,49 +828,37 @@ function yuno_get_or_create_customer($order) {
         }
     }
 
-    $billing_address = [];
-    if (!empty($billing_country)) $billing_address['country'] = $billing_country;
-    if (!empty($billing_state)) $billing_address['state'] = $billing_state;
-    if (!empty($billing_city)) $billing_address['city'] = $billing_city;
-    if (!empty($billing_postcode)) $billing_address['zip_code'] = $billing_postcode; // Changed from postal_code
-    if (!empty($billing_address1)) $billing_address['address_line_1'] = $billing_address1; // Changed from line1
-    if (!empty($billing_address2)) $billing_address['address_line_2'] = $billing_address2; // Changed from line2
-
+    $billing_address = yuno_build_address_from_order($order, 'billing');
     if (!empty($billing_address)) {
         $payload['billing_address'] = $billing_address;
     }
 
-    $shipping_address = [];
-    if (!empty($shipping_country)) $shipping_address['country'] = $shipping_country;
-    if (!empty($shipping_state)) $shipping_address['state'] = $shipping_state;
-    if (!empty($shipping_city)) $shipping_address['city'] = $shipping_city;
-    if (!empty($shipping_postcode)) $shipping_address['zip_code'] = $shipping_postcode; // Changed from postal_code
-    if (!empty($shipping_address1)) $shipping_address['address_line_1'] = $shipping_address1; // Changed from line1
-    if (!empty($shipping_address2)) $shipping_address['address_line_2'] = $shipping_address2; // Changed from line2
-
+    $shipping_address = yuno_build_address_from_order($order, 'shipping', 'billing');
     if (!empty($shipping_address)) {
         $payload['shipping_address'] = $shipping_address;
     }
 
-    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
-    $apiUrl = yuno_api_url_from_public_key($publicKey);
+    $public_key = yuno_get_env('PUBLIC_API_KEY', '');
+    $api_url = yuno_api_url_from_public_key($public_key);
 
     //Always CREATE new customer (no reuse, no update logic)
     yuno_log('info', '[CUSTOMER]Creating new customer (always fresh per order)', [
         'order_id'             => $order->get_id(),
         'merchant_customer_id' => $merchant_customer_id,
-        'email'                => $billing_email,
-        'api_url'              => $apiUrl,
-        'payload'              => $payload,
+        'has_email'            => !empty($billing_email),
+        'has_phone'            => !empty($billing_phone),
+        'has_billing_address'  => !empty($billing_address),
+        'has_shipping_address' => !empty($shipping_address),
+        'country'              => $billing_country,
     ]);
 
     // Call Yuno Create Customer API
     $res = yuno_wp_remote_json(
         'POST',
-        "{$apiUrl}/v1/customers",
+        "{$api_url}/v1/customers",
         [
-            'public-api-key'     => $publicKey,
-            'private-secret-key' => $secretKey,
+            'public-api-key'     => $public_key,
+            'private-secret-key' => $secret_key,
             'Content-Type'       => 'application/json',
         ],
         $payload,
@@ -875,10 +866,10 @@ function yuno_get_or_create_customer($order) {
     );
 
     yuno_log('info', '[CUSTOMER]API response received', [
-        'order_id' => $order->get_id(),
-        'ok'       => $res['ok'] ? 'TRUE' : 'FALSE',
-        'status'   => $res['status'] ?? 'N/A',
-        'response' => $res['raw'], // Log complete response
+        'order_id'    => $order->get_id(),
+        'ok'          => $res['ok'],
+        'http_status' => $res['status'] ?? null,
+        'customer_id' => is_array($res['raw']) ? ($res['raw']['id'] ?? null) : null,
     ]);
 
     if (!$res['ok']) {
@@ -894,10 +885,10 @@ function yuno_get_or_create_customer($order) {
 
             $search_res = yuno_wp_remote_json(
                 'GET',
-                "{$apiUrl}/v1/customers?merchant_customer_id=" . urlencode($merchant_customer_id),
+                "{$api_url}/v1/customers?merchant_customer_id=" . urlencode($merchant_customer_id),
                 [
-                    'public-api-key'     => $publicKey,
-                    'private-secret-key' => $secretKey,
+                    'public-api-key'     => $public_key,
+                    'private-secret-key' => $secret_key,
                 ],
                 null,
                 30
@@ -934,9 +925,9 @@ function yuno_get_or_create_customer($order) {
         }
 
         yuno_log('warning', '[CUSTOMER]API call failed, continuing without customer', [
-            'order_id'  => $order->get_id(),
-            'status'    => $res['status'],
-            'response'  => $res['raw'],
+            'order_id'    => $order->get_id(),
+            'http_status' => $res['status'],
+            'error_code'  => is_array($res['raw']) ? ($res['raw']['code'] ?? null) : null,
         ]);
         return null; // Graceful degradation - continues without customer
     }
@@ -951,8 +942,8 @@ function yuno_get_or_create_customer($order) {
 
     if (empty($customer_id)) {
         yuno_log('warning', '[CUSTOMER]Missing id in response, continuing without customer', [
-            'order_id' => $order->get_id(),
-            'response' => $res['raw'],
+            'order_id'    => $order->get_id(),
+            'http_status' => $res['status'],
         ]);
         return null; // Graceful degradation
     }
@@ -1010,6 +1001,14 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         return yuno_json(['error' => 'Missing checkout session'], 400);
     }
 
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $checkout_session)) {
+        yuno_log('error', '[CONFIRM] Invalid checkout session format', [
+            'order_id' => $order->get_id(),
+            'session'  => $checkout_session,
+        ]);
+        return yuno_json(['error' => 'Invalid checkout session format'], 400);
+    }
+
     // Check if order is already paid (idempotency)
     if ($order->is_paid()) {
         yuno_log('info', 'Confirm: order already paid', [
@@ -1025,15 +1024,15 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
-    $secretKey = yuno_get_env('PRIVATE_SECRET_KEY', '');
+    $public_key = yuno_get_env('PUBLIC_API_KEY', '');
+    $secret_key = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
-    if (!$publicKey || !$secretKey) {
+    if (!$public_key || !$secret_key) {
         yuno_log('error', 'Confirm: missing API keys', ['order_id' => $order->get_id()]);
         return yuno_json(['error' => 'Missing API keys'], 500);
     }
 
-    $apiUrl = yuno_api_url_from_public_key($publicKey);
+    $api_url = yuno_api_url_from_public_key($public_key);
 
     yuno_log('info', '[CONFIRM] Verifying via checkout session', [
         'order_id'   => $order->get_id(),
@@ -1042,8 +1041,11 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
 
     $res = yuno_wp_remote_json(
         'GET',
-        "{$apiUrl}/v1/checkout/sessions/{$checkout_session}/payment",
-        ['public-api-key' => $publicKey],
+        "{$api_url}/v1/checkout/sessions/{$checkout_session}/payment",
+        [
+            'public-api-key'     => $public_key,
+            'private-secret-key' => $secret_key,
+        ],
         null,
         30
     );
@@ -1052,11 +1054,9 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         yuno_log('error', '[CONFIRM] Failed to verify payment via checkout session', [
             'order_id'   => $order->get_id(),
             'session_id' => $checkout_session,
-            'status'     => $res['status'],
-            'response'   => $res['raw'],
+            'http_status' => $res['status'],
         ]);
         $order->add_order_note('Yuno verification failed (HTTP ' . $res['status'] . '). session=' . $checkout_session);
-        $order->save();
         return yuno_json(['error' => 'Could not verify payment status with Yuno', 'retry' => true], 500);
     }
 
@@ -1067,11 +1067,12 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         'session_id'      => $checkout_session,
         'verified_status' => $verified_status,
         'client_status'   => $client_status,
-        'full_response'   => yuno_debug_enabled() ? $res['raw'] : null,
+        'payment_id'      => $res['raw']['transactions']['id'] ?? null,
+        'payment_method'  => $res['raw']['transactions']['payment_method_type'] ?? null,
     ]);
 
     // Handle verified status
-    if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED', 'PAYED'], true)) {
+    if (in_array($verified_status, YUNO_STATUS_SUCCESS, true)) {
         // Debug diagnostics: only run if debug mode is enabled
         if (yuno_debug_enabled()) {
             $order_items_debug = [];
@@ -1108,9 +1109,7 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         }
 
         $order->payment_complete();
-
         $order->add_order_note('Yuno payment approved. status=' . $verified_status . ' session=' . $checkout_session);
-        $order->save();
 
         // Debug diagnostics: only run if debug mode is enabled
         if (yuno_debug_enabled()) {
@@ -1142,10 +1141,9 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
+    if (in_array($verified_status, YUNO_STATUS_FAILURE, true)) {
         $order->update_status('failed', 'Yuno payment rejected (verified): ' . $verified_status);
         $order->add_order_note('Yuno payment rejected. status=' . $verified_status . ' session=' . $checkout_session);
-        $order->save();
 
         yuno_log('warning', 'Confirm: order marked as failed', [
             'order_id'   => $order->get_id(),
@@ -1163,36 +1161,52 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    //Intermediate states (PENDING, PROCESSING, REQUIRES_ACTION, etc.)
-    // Change order status to 'on-hold' to indicate payment is processing
-    // WooCommerce status meanings:
-    // - 'pending' = Waiting for payment (order created but no payment initiated)
-    // - 'on-hold' = Payment received/processing, waiting for confirmation
-    // - 'processing' = Payment confirmed, order being fulfilled
-    if (in_array($verified_status, ['PENDING', 'PROCESSING', 'REQUIRES_ACTION'], true)) {
-        $order->update_status('on-hold', 'Yuno payment pending confirmation: ' . $verified_status);
+    // PENDING/PROCESSING/REQUIRES_ACTION — with Seamless SDK (auto-capture enabled),
+    // these mean the payment is authorized and capture happens automatically on Yuno's side.
+    // Treat as successful: call payment_complete() same as SUCCESS.
+    if (in_array($verified_status, YUNO_STATUS_PENDING, true)) {
+        if (yuno_debug_enabled()) {
+            $order_items_debug = [];
+            foreach ($order->get_items() as $item) {
+                $product = $item->get_product();
+                if ($product) {
+                    $order_items_debug[] = [
+                        'name'            => $product->get_name(),
+                        'is_virtual'      => $product->is_virtual() ? 'YES' : 'NO',
+                        'is_downloadable' => $product->is_downloadable() ? 'YES' : 'NO',
+                        'needs_shipping'  => $product->needs_shipping() ? 'YES' : 'NO',
+                    ];
+                }
+            }
+
+            yuno_log('info', 'Confirm: order product analysis BEFORE payment_complete() [PENDING]', [
+                'order_id'         => $order->get_id(),
+                'needs_shipping'   => $order->needs_shipping_address() ? 'YES' : 'NO',
+                'needs_processing' => $order->needs_processing() ? 'YES' : 'NO',
+                'has_downloadable' => $order->has_downloadable_item() ? 'YES' : 'NO',
+                'products'         => $order_items_debug,
+                'current_status'   => $order->get_status(),
+            ]);
+        }
+
+        $order->payment_complete();
+        $order->add_order_note('Yuno payment authorized (pending capture). status=' . $verified_status . ' session=' . $checkout_session);
+
+        if (yuno_debug_enabled()) {
+            yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete() [PENDING]', [
+                'order_id'                      => $order->get_id(),
+                'session_id'                    => $checkout_session,
+                'status_after_payment_complete' => $order->get_status(),
+            ]);
+        }
+
+        return yuno_json([
+            'ok'        => true,
+            'order_id'  => $order->get_id(),
+            'new_status'=> $order->get_status(),
+            'redirect'  => $order->get_checkout_order_received_url(),
+        ], 200);
     }
-
-    $order->add_order_note('Yuno payment status: ' . $verified_status . ' session=' . $checkout_session);
-    $order->save();
-
-    yuno_log('info', 'Confirm: payment in intermediate state, order set to on-hold', [
-        'order_id'     => $order->get_id(),
-        'session_id'   => $checkout_session,
-        'yuno_status'  => $verified_status,
-        'order_status' => $order->get_status(),
-    ]);
-
-    //For PENDING payments (3DS, etc.), DON'T redirect to order-received
-    // User must stay on payment page to complete authentication flow
-    // Webhook will confirm the order when payment completes
-    return yuno_json([
-        'ok'      => true,
-        'order_id'=> $order->get_id(),
-        'status'  => $verified_status,
-        'pending' => true,
-        'message' => 'Payment is being processed',
-    ], 200);
 }
 
 /**
@@ -1216,12 +1230,13 @@ function yuno_check_order_status(WP_REST_Request $request) {
         return yuno_json(['error' => 'Order not found'], 404);
     }
 
-    // Validate order key if provided
-    if ($order_key && $order->get_order_key() !== $order_key) {
-        yuno_log('warning', 'Check order status: order_key mismatch', [
+    // Validate order key (mandatory for authentication)
+    if (!$order_key) {
+        return yuno_json(['error' => 'Missing order_key'], 400);
+    }
+    if ($order->get_order_key() !== $order_key) {
+        yuno_log('error', 'Check order status: order_key mismatch', [
             'order_id'      => $order_id,
-            'provided_key'  => $order_key,
-            'expected_key'  => $order->get_order_key(),
         ]);
         return yuno_json(['error' => 'Invalid order_key'], 403);
     }
@@ -1294,11 +1309,12 @@ function yuno_check_order_status(WP_REST_Request $request) {
         'session_id' => $checkout_session,
     ]);
 
-    $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+    $public_key = yuno_get_env('PUBLIC_API_KEY', '');
+    $secret_key = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
-    if (!$publicKey) {
+    if (!$public_key || !$secret_key) {
         // Can't verify, but safer to allow than silently block
-        yuno_log('warning', 'Check order status: missing public API key', [
+        yuno_log('warning', 'Check order status: missing API keys', [
             'order_id' => $order_id,
         ]);
 
@@ -1310,12 +1326,15 @@ function yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    $apiUrl = yuno_api_url_from_public_key($publicKey);
+    $api_url = yuno_api_url_from_public_key($public_key);
 
     $res = yuno_wp_remote_json(
         'GET',
-        "{$apiUrl}/v1/checkout/sessions/{$checkout_session}/payment",
-        ['public-api-key' => $publicKey],
+        "{$api_url}/v1/checkout/sessions/{$checkout_session}/payment",
+        [
+            'public-api-key'     => $public_key,
+            'private-secret-key' => $secret_key,
+        ],
         null,
         10
     );
@@ -1346,7 +1365,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
     ]);
 
     // 5. If payment is SUCCEEDED in Yuno, mark order as paid NOW
-    if (in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED', 'PAYED'], true)) {
+    if (in_array($verified_status, YUNO_STATUS_SUCCESS, true)) {
         yuno_log('info', 'Check order status: Payment succeeded in Yuno, marking order as paid', [
             'order_id'   => $order_id,
             'session_id' => $checkout_session,
@@ -1356,7 +1375,6 @@ function yuno_check_order_status(WP_REST_Request $request) {
         // Mark order as paid
         $order->payment_complete();
         $order->add_order_note('Yuno payment confirmed via check-order-status (page reload). status=' . $verified_status . ' session=' . $checkout_session);
-        $order->save();
 
         $redirect = $order->get_checkout_order_received_url();
 
@@ -1371,7 +1389,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
     }
 
     // 6. If payment is REJECTED/FAILED, mark order as failed and signal duplication
-    if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
+    if (in_array($verified_status, YUNO_STATUS_FAILURE, true)) {
         yuno_log('warning', 'Check order status: Payment failed in Yuno, marking as failed', [
             'order_id'   => $order_id,
             'session_id' => $checkout_session,
@@ -1382,7 +1400,6 @@ function yuno_check_order_status(WP_REST_Request $request) {
         if ($status !== 'failed') {
             $order->update_status('failed', 'Yuno payment failed (check-order-status): ' . $verified_status);
             $order->add_order_note('Yuno payment failed. status=' . $verified_status . ' session=' . $checkout_session);
-            $order->save();
         }
 
         return yuno_json([
@@ -1439,26 +1456,26 @@ function yuno_create_duplicate_order_internal($order) {
 
     // Copy all line items from original order (clone to preserve original prices)
     // Using add_product() would use current prices, not original order prices
-    foreach ($order->get_items() as $item_id => $item) {
+    foreach ($order->get_items() as $item) {
         $cloned_item = clone $item;
         $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
         $new_order->add_item($cloned_item);
     }
 
-    foreach ($order->get_items('shipping') as $item_id => $item) {
+    foreach ($order->get_items('shipping') as $item) {
         $cloned_item = clone $item;
         $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
         $new_order->add_item($cloned_item);
     }
 
-    foreach ($order->get_items('fee') as $item_id => $item) {
+    foreach ($order->get_items('fee') as $item) {
         $cloned_item = clone $item;
         $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
         $new_order->add_item($cloned_item);
     }
 
     // Copy coupons (CRITICAL: preserve discounts from original order)
-    foreach ($order->get_items('coupon') as $item_id => $item) {
+    foreach ($order->get_items('coupon') as $item) {
         $cloned_item = clone $item;
         $cloned_item->set_id(0); // Reset ID so WooCommerce creates a new item
         $new_order->add_item($cloned_item);
@@ -1509,15 +1526,11 @@ function yuno_create_duplicate_order_internal($order) {
 
     // Store metadata linking failed order to duplicate (prevents creating multiple duplicates)
     $order->update_meta_data('_yuno_duplicate_order_id', $new_order->get_id());
+    $order->add_order_note('New order #' . $new_order->get_id() . ' created for payment retry.');
     $order->save();
 
     // Store reference to original order in duplicate
     $new_order->update_meta_data('_yuno_original_order_id', $order->get_id());
-    $new_order->save();
-
-    $order->add_order_note('New order #' . $new_order->get_id() . ' created for payment retry.');
-    $order->save();
-
     $new_order->add_order_note('Created from failed order #' . $order->get_id() . ' for payment retry.');
     $new_order->save();
 
@@ -1572,9 +1585,12 @@ function yuno_duplicate_order(WP_REST_Request $request) {
         $new_order = yuno_create_duplicate_order_internal($order);
 
         if (is_wp_error($new_order)) {
+            yuno_log('error', 'Duplicate order: creation returned WP_Error', [
+                'original_order_id' => $order->get_id(),
+                'error_message'     => $new_order->get_error_message(),
+            ]);
             return yuno_json([
-                'error'   => 'Failed to create new order',
-                'message' => $new_order->get_error_message(),
+                'error' => 'Failed to create new order',
             ], 500);
         }
 
@@ -1594,8 +1610,7 @@ function yuno_duplicate_order(WP_REST_Request $request) {
         ]);
 
         return yuno_json([
-            'error'   => 'Failed to create new order',
-            'message' => $e->getMessage(),
+            'error' => 'Failed to create new order',
         ], 500);
     }
 }
@@ -1621,12 +1636,16 @@ function yuno_update_checkout_session(WP_REST_Request $request) {
         return yuno_json(['error' => 'Missing checkout_session'], 400);
     }
 
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $new_session)) {
+        return yuno_json(['error' => 'Invalid checkout_session format'], 400);
+    }
+
     $old_session = (string) $order->get_meta('_yuno_checkout_session');
 
     // Mark order as failed
     if (!$order->is_paid()) {
-        $order->update_status('failed', 'Payment failed by customer with checkout session: ' . $old_session);
-        $order->add_order_note('Yuno webhook: Payment failed by customer, awaiting retry with new checkout session: ' . $new_session . '.');
+        $order->update_status('failed', 'Yuno: Payment failed with checkout session: ' . $old_session);
+        $order->add_order_note('Yuno: Payment retry initiated with new checkout session: ' . $new_session . '.');
     }
 
     $order->update_meta_data('_yuno_checkout_session', $new_session);
@@ -1660,43 +1679,43 @@ function yuno_update_checkout_session(WP_REST_Request $request) {
  */
 function yuno_verify_webhook_signature(WP_REST_Request $request) {
     // 1) Validate x-api-key / x-secret headers (from Yuno Dashboard)
-    $expectedApiKey = (string) yuno_get_env('WEBHOOK_API_KEY', '');
-    $expectedXSecret = (string) yuno_get_env('WEBHOOK_X_SECRET', '');
+    $expected_api_key = (string) yuno_get_env('WEBHOOK_API_KEY', '');
+    $expected_x_secret = (string) yuno_get_env('WEBHOOK_X_SECRET', '');
 
-    $receivedApiKey = (string) $request->get_header('x-api-key');
-    $receivedXSecret = (string) $request->get_header('x-secret');
+    $received_api_key = (string) $request->get_header('x-api-key');
+    $received_x_secret = (string) $request->get_header('x-secret');
 
-    if ($expectedApiKey === '' || $expectedXSecret === '') {
+    if ($expected_api_key === '' || $expected_x_secret === '') {
         yuno_log('error', 'Webhook: WEBHOOK_API_KEY/WEBHOOK_X_SECRET not configured', []);
         return false;
     }
 
-    if (!hash_equals($expectedApiKey, $receivedApiKey)) {
-        yuno_log('warning', 'Webhook: x-api-key mismatch', [
-            'received' => $receivedApiKey !== '' ? substr($receivedApiKey, 0, 8) . '...' : '(empty)',
+    if (!hash_equals($expected_api_key, $received_api_key)) {
+        yuno_log('error', 'Webhook: x-api-key mismatch', [
+            'received' => $received_api_key !== '' ? substr($received_api_key, 0, 8) . '...' : '(empty)',
         ]);
         return false;
     }
 
-    if (!hash_equals($expectedXSecret, $receivedXSecret)) {
-        yuno_log('warning', 'Webhook: x-secret mismatch', [
-            'received' => $receivedXSecret !== '' ? substr($receivedXSecret, 0, 8) . '...' : '(empty)',
+    if (!hash_equals($expected_x_secret, $received_x_secret)) {
+        yuno_log('error', 'Webhook: x-secret mismatch', [
+            'received' => $received_x_secret !== '' ? substr($received_x_secret, 0, 8) . '...' : '(empty)',
         ]);
         return false;
     }
 
     // 2) Validate HMAC signature (Client Secret Key from Yuno Dashboard)
-    $receivedSig = trim((string) $request->get_header('x-hmac-signature'));
+    $received_sig = trim((string) $request->get_header('x-hmac-signature'));
 
-    if ($receivedSig === '') {
+    if ($received_sig === '') {
         yuno_log('warning', 'Webhook: missing x-hmac-signature header', []);
         return false;
     }
 
     //CRITICAL FIX: Use WEBHOOK_HMAC_SECRET (not PRIVATE_SECRET_KEY)
-    $hmacSecret = (string) yuno_get_env('WEBHOOK_HMAC_SECRET', '');
+    $hmac_secret = (string) yuno_get_env('WEBHOOK_HMAC_SECRET', '');
 
-    if ($hmacSecret === '') {
+    if ($hmac_secret === '') {
         yuno_log('error', 'Webhook: WEBHOOK_HMAC_SECRET not configured', []);
         return false;
     }
@@ -1709,26 +1728,26 @@ function yuno_verify_webhook_signature(WP_REST_Request $request) {
     }
 
     // Remove "sha256=" prefix if present
-    $receivedSig = preg_replace('/^sha256=/i', '', $receivedSig);
+    $received_sig = preg_replace('/^sha256=/i', '', $received_sig);
 
     // Compute HMAC in both hex and base64 formats (Yuno might send either)
-    $computedHex = hash_hmac('sha256', $body, $hmacSecret);
-    $computedB64 = base64_encode(hash_hmac('sha256', $body, $hmacSecret, true));
+    $computed_hex = hash_hmac('sha256', $body, $hmac_secret);
+    $computed_b64 = base64_encode(hash_hmac('sha256', $body, $hmac_secret, true));
 
-    $isValid = hash_equals($computedHex, $receivedSig) || hash_equals($computedB64, $receivedSig);
+    $is_valid = hash_equals($computed_hex, $received_sig) || hash_equals($computed_b64, $received_sig);
 
-    if (!$isValid) {
-        yuno_log('warning', 'Webhook: HMAC signature mismatch', [
-            'received_prefix' => substr($receivedSig, 0, 16) . '...',
-            'computed_hex'    => substr($computedHex, 0, 16) . '...',
-            'computed_b64'    => substr($computedB64, 0, 16) . '...',
+    if (!$is_valid) {
+        yuno_log('error', 'Webhook: HMAC signature mismatch', [
+            'received_prefix' => substr($received_sig, 0, 16) . '...',
+            'computed_hex'    => substr($computed_hex, 0, 16) . '...',
+            'computed_b64'    => substr($computed_b64, 0, 16) . '...',
             'body_length'     => strlen($body),
         ]);
         return false;
     }
 
     yuno_log('info', 'Webhook: HMAC signature verified successfully', [
-        'signature' => substr($receivedSig, 0, 16) . '...',
+        'signature' => substr($received_sig, 0, 16) . '...',
     ]);
 
     return true;
@@ -1799,6 +1818,9 @@ function yuno_handle_webhook(WP_REST_Request $request) {
                 case 'EXPIRED':
                     $event_type = 'payment.declined';
                     break;
+                case 'PENDING':
+                    $event_type = 'payment.pending';
+                    break;
                 default:
                     yuno_log('warning', 'Webhook: unknown payment status', [
                         'status' => $payment_status,
@@ -1831,6 +1853,11 @@ function yuno_handle_webhook(WP_REST_Request $request) {
             'full_data'  => yuno_debug_enabled() ? $event_data : null,
         ]);
         return yuno_json(['received' => true, 'error' => 'Missing checkout session'], 200);
+    }
+
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $checkout_session)) {
+        yuno_log('error', 'Webhook: invalid checkout session format', ['session' => $checkout_session]);
+        return yuno_json(['received' => true, 'error' => 'Invalid checkout session'], 200);
     }
 
     yuno_log('info', 'Webhook: processing event', [
@@ -1875,6 +1902,21 @@ function yuno_handle_webhook(WP_REST_Request $request) {
         case 'payment.refund':
         case 'refunds':
             return yuno_webhook_handle_refund($order, $checkout_session, $event_data);
+
+        case 'payment.pending':
+            $payment_sub_status = $event_data['sub_status'] ?? 'UNKNOWN';
+
+            yuno_log('info', 'Webhook: payment pending', [
+                'event_type'       => $event_type,
+                'order_id'         => $order->get_id(),
+                'checkout_session' => $checkout_session,
+                'sub_status'       => $payment_sub_status,
+            ]);
+
+            $order->add_order_note('Yuno webhook: ' . $event_type . ' (session=' . $checkout_session . ', sub_status=' . $payment_sub_status . ')');
+            $order->save();
+
+            return yuno_json(['received' => true, 'event_type' => $event_type], 200);
 
         default:
             yuno_log('info', 'Webhook: unhandled event type', [
@@ -1952,9 +1994,9 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
     $order_id = $order->get_id();
 
     // Use lock to prevent race condition with frontend confirmation
-    $lockKey = 'yuno_webhook_lock_' . $order_id;
+    $lock_key = 'yuno_webhook_lock_' . $order_id;
 
-    if (get_transient($lockKey)) {
+    if (get_transient($lock_key)) {
         yuno_log('info', 'Webhook: payment.succeeded - already processing', [
             'order_id'         => $order_id,
             'checkout_session' => $checkout_session,
@@ -1962,7 +2004,7 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
         return yuno_json(['received' => true, 'skipped' => 'already_processing'], 200);
     }
 
-    set_transient($lockKey, 1, 30);
+    set_transient($lock_key, 1, 30);
 
     try {
         // Check if already paid (idempotency)
@@ -1973,16 +2015,17 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
                 'order_status'     => $order->get_status(),
             ]);
 
-            delete_transient($lockKey);
+            delete_transient($lock_key);
             return yuno_json(['received' => true, 'skipped' => 'already_paid'], 200);
         }
 
         // CRITICAL: Verify payment status with Yuno API before marking as paid
         // Don't trust webhook event alone - always verify with API
-        $publicKey = yuno_get_env('PUBLIC_API_KEY', '');
+        $public_key = yuno_get_env('PUBLIC_API_KEY', '');
+        $secret_key = yuno_get_env('PRIVATE_SECRET_KEY', '');
 
-        if ($publicKey) {
-            $apiUrl = yuno_api_url_from_public_key($publicKey);
+        if ($public_key && $secret_key) {
+            $api_url = yuno_api_url_from_public_key($public_key);
 
             yuno_log('info', 'Webhook: payment.succeeded - verifying with Yuno API', [
                 'order_id'         => $order_id,
@@ -1991,8 +2034,11 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
 
             $res = yuno_wp_remote_json(
                 'GET',
-                "{$apiUrl}/v1/checkout/sessions/{$checkout_session}/payment",
-                ['public-api-key' => $publicKey],
+                "{$api_url}/v1/checkout/sessions/{$checkout_session}/payment",
+                [
+                    'public-api-key'     => $public_key,
+                    'private-secret-key' => $secret_key,
+                ],
                 null,
                 30
             );
@@ -2007,7 +2053,7 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
                 ]);
 
                 // If payment is NOT actually succeeded, mark as failed instead
-                if (in_array($verified_status, ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED'], true)) {
+                if (in_array($verified_status, YUNO_STATUS_FAILURE, true)) {
                     yuno_log('warning', 'Webhook: payment.succeeded event but API shows FAILED - marking as failed', [
                         'order_id'         => $order_id,
                         'checkout_session' => $checkout_session,
@@ -2016,9 +2062,8 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
 
                     $order->update_status('failed', 'Yuno webhook: Payment succeeded event received but API verification shows: ' . $verified_status);
                     $order->add_order_note('Yuno webhook: Payment succeeded event received but verification failed. status=' . $verified_status . ' session=' . $checkout_session);
-                    $order->save();
 
-                    delete_transient($lockKey);
+                    delete_transient($lock_key);
 
                     // Do NOT duplicate here: duplication is frontend-driven (customer must be present).
                     // If the customer is still on the page the SDK will fire a failure callback.
@@ -2029,7 +2074,7 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
                 }
 
                 // If payment is not confirmed as succeeded, don't mark as paid yet
-                if (!in_array($verified_status, ['SUCCEEDED', 'VERIFIED', 'APPROVED', 'PAYED'], true)) {
+                if (!in_array($verified_status, YUNO_STATUS_SUCCESS, true)) {
                     yuno_log('warning', 'Webhook: payment.succeeded event but status not confirmed', [
                         'order_id'         => $order_id,
                         'checkout_session' => $checkout_session,
@@ -2039,7 +2084,7 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
                     $order->add_order_note('Yuno webhook: Payment succeeded event received but status is: ' . $verified_status . ' (session=' . $checkout_session . ')');
                     $order->save();
 
-                    delete_transient($lockKey);
+                    delete_transient($lock_key);
                     return yuno_json(['received' => true, 'status' => 'pending_confirmation'], 200);
                 }
             }
@@ -2048,7 +2093,6 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
         // Mark order as paid (only if verified or no public key to verify)
         $order->payment_complete($checkout_session);
         $order->add_order_note('Yuno webhook: Payment succeeded (session=' . $checkout_session . ')');
-        $order->save();
 
         yuno_log('info', 'Webhook: payment.succeeded - order marked as paid', [
             'order_id'         => $order_id,
@@ -2056,7 +2100,7 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
             'order_status'     => $order->get_status(),
         ]);
 
-        delete_transient($lockKey);
+        delete_transient($lock_key);
 
         return yuno_json(['received' => true, 'order_updated' => true], 200);
 
@@ -2067,10 +2111,10 @@ function yuno_webhook_handle_payment_succeeded($order, $checkout_session, $event
             'error'            => $e->getMessage(),
         ]);
 
-        delete_transient($lockKey);
+        delete_transient($lock_key);
 
         // Return 200 to prevent retries (will log error for manual review)
-        return yuno_json(['received' => true, 'error' => $e->getMessage()], 200);
+        return yuno_json(['received' => true, 'error' => 'Internal processing error'], 200);
     }
 }
 
@@ -2117,7 +2161,6 @@ function yuno_webhook_handle_payment_failed($order, $checkout_session, $event_da
     // Mark as failed
     $order->update_status('failed', 'Yuno webhook: Payment failed - ' . $status);
     $order->add_order_note('Yuno webhook: Payment failed (session=' . $checkout_session . ', status=' . $status . ')');
-    $order->save();
 
     yuno_log('info', 'Webhook: payment.failed - order marked as failed', [
         'order_id'         => $order_id,
