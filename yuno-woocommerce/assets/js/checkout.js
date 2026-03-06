@@ -42,15 +42,15 @@
 
   let yunoInstance = null;
 
-  const order_ctx = window.YUNO_WC || {};
+  const yunoConfig = window.YUNO_WC || {};
 
   const state = {
     starting: false,
     started: false,
     paid: false,
 
-    orderId: Number(order_ctx.orderId || 0),
-    orderKey: order_ctx.orderKey || "",
+    orderId: Number(yunoConfig.orderId || 0),
+    orderKey: yunoConfig.orderKey || "",
 
     checkoutSession: null,
     selectedPaymentMethod: null,
@@ -117,25 +117,6 @@
     if (overlay) overlay.remove();
   }
 
-  function initPayButtonHoverEffects() {
-    const btn = document.getElementById("yuno-button-pay");
-    if (!btn) return;
-
-    btn.addEventListener("mouseenter", () => {
-      if (!btn.disabled) {
-        btn.style.backgroundColor = "#333333";
-      }
-    });
-
-    btn.addEventListener("mouseleave", () => {
-      if (!btn.disabled) {
-        btn.style.backgroundColor = "#000000";
-      }
-    });
-  }
-
-  setTimeout(() => initPayButtonHoverEffects(), 500);
-
   function resolvePayButtonTarget(e) {
     const t = e.target;
 
@@ -161,7 +142,7 @@
     const start = Date.now();
     while (Date.now() - start < maxMs) {
       if (window.Yuno && typeof window.Yuno.initialize === "function") return true;
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return false;
   }
@@ -175,17 +156,24 @@
    */
   async function runPreflightChecks() {
     try {
-      console.log('state.orderKey', state.orderKey);
       const statusRes = await checkOrderStatus({
         orderId: state.orderId,
         orderKey: state.orderKey,
       });
 
-      console.log('[YUNO] runPreflightChecks → statusRes:', statusRes);
-
       // Redirect whenever the backend provides a redirect URL (covers paid, failed-to-receive, etc.)
       if (statusRes.redirect) {
-        window.location.href = statusRes.redirect;
+        try {
+          const redirectUrl = new URL(statusRes.redirect, window.location.origin);
+          if (redirectUrl.origin !== window.location.origin) {
+            console.error("[YUNO] Blocked redirect to external origin:", redirectUrl.origin);
+            return true;
+          }
+          window.location.href = redirectUrl.href;
+        } catch {
+          console.error("[YUNO] Invalid redirect URL");
+          return true;
+        }
         return false;
       }
 
@@ -195,11 +183,6 @@
                         (statusRes.verified_status && FAILURE_STATUSES.includes(statusRes.verified_status));
 
       if (hasFailed) {
-        console.log("[YUNO] Order/payment is failed, auto-duplicating...", {
-          status: statusRes.status,
-          verified_status: statusRes.verified_status,
-        });
-
         try {
           const duplicateRes = await duplicateOrder({
             orderId: state.orderId,
@@ -207,8 +190,12 @@
           });
 
           if (duplicateRes?.ok && duplicateRes?.new_order_id) {
-            console.log("[YUNO] New order created:", duplicateRes.new_order_id);
-            // window.location.href = duplicateRes.pay_url;
+            try {
+              const payUrl = new URL(duplicateRes.pay_url, window.location.origin);
+              if (payUrl.origin === window.location.origin) {
+                window.location.href = payUrl.href;
+              }
+            } catch { /* ignore invalid URL */ }
             return false;
           }
         } catch (e) {
@@ -224,16 +211,40 @@
     return true;
   }
 
-  async function startYunoCheckout() {
+  /**
+   * Reset SDK state so startYunoCheckout() can re-initialize from scratch.
+   * Clears SDK containers, instance reference, and state flags.
+   */
+  function resetSdkState() {
+    yunoInstance = null;
+    state.started = false;
+    state.starting = false;
+    state.selectedPaymentMethod = null;
+
+    ['yuno-root', 'yuno-apm-form', 'yuno-action-form'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        const fresh = document.createElement('div');
+        fresh.id = id;
+        el.replaceWith(fresh);
+      }
+    });
+  }
+
+  async function startYunoCheckout({ skipPreflight = false } = {}) {
     if (state.starting || state.started) return;
     state.starting = true;
 
     try {
-      // Run pre-flight checks before initializing SDK and creating sessions. This handles edge cases like:
-      // - User reloads page after failed payment (auto-duplicate)
-      // - Order is already paid or has a redirect URL (redirect immediately)
-      const shouldContinue = await runPreflightChecks();
-      if (!shouldContinue) return;
+      showProcessingOverlay();
+
+      if (!skipPreflight) {
+        // Run pre-flight checks before initializing SDK and creating sessions. This handles edge cases like:
+        // - User reloads page after failed payment (auto-duplicate)
+        // - Order is already paid or has a redirect URL (redirect immediately)
+        const shouldContinue = await runPreflightChecks();
+        if (!shouldContinue) return;
+      }
 
       // Wait for SDK to be available (prevents init too early)
       const isSdkAvailable = await waitForYunoSdk();
@@ -242,13 +253,18 @@
         return;
       }
 
-      // Create or get existing customer ID for the order
-      const customerId = await createCustomer({
-        orderId: state.orderId,
-        orderKey: state.orderKey,
-      });
+      // Parallelize customer creation with public API key resolution
+      const [customerId, publicApiKey] = await Promise.all([
+        createCustomer({ orderId: state.orderId, orderKey: state.orderKey }),
+        yunoConfig.publicApiKey ? Promise.resolve(yunoConfig.publicApiKey) : getPublicApiKey(),
+      ]);
 
-      // Create checkout session
+      if (!publicApiKey) {
+        console.error("[YUNO] publicApiKey empty. Check /public-api-key");
+        return;
+      }
+
+      // Create checkout session (depends on customerId)
       const sessionRes = await getCheckoutSession({
         orderId: state.orderId,
         orderKey: state.orderKey,
@@ -256,16 +272,9 @@
       });
 
       const checkoutSession = sessionRes?.checkout_session;
-      
+
       if (!checkoutSession) {
-        console.error("Failed to create checkout session");
-        return;
-      }
-
-      const publicApiKey = await getPublicApiKey();
-
-      if (!publicApiKey) {
-        console.error(" publicApiKey empty. Check /public-api-key");
+        console.error("[YUNO] Failed to create checkout session");
         return;
       }
 
@@ -273,26 +282,17 @@
 
       const RENDER_MODE_TYPE = "modal";
 
-      const countryCode = String(sessionRes?.country || order_ctx.country || "CO");
-
-      console.log("[YUNO] startSeamlessCheckout →", {
-        checkoutSession: checkoutSession,
-        countryCode: countryCode,
-        renderMode: RENDER_MODE_TYPE,
-      });
-
+      const countryCode = String(sessionRes?.country || yunoConfig.country || "CO");
 
       await yunoInstance.startSeamlessCheckout({
         checkoutSession: checkoutSession,
         elementSelector: "#yuno-root",
         countryCode: countryCode,
-        language: order_ctx.language || "es", // Use WordPress language, fallback to Spanish
+        language: yunoConfig.language || "es", // Use WordPress language, fallback to Spanish
         showLoading: true, // Disable SDK loader to prevent "One moment please" flash
         issuersFormEnable: true,
         showPaymentStatus: true,
         onLoading: async ({ isLoading, type, data }) => {
-          console.log("[YUNO] onLoading →", { isLoading, type, data });
-
           // PAYMENT_RETRY: SDK signals that payment failed and provides a new checkout session.
           // Update the stored session so subsequent confirmOrder() calls use the correct session.
           if (type === 'PAYMENT_RETRY') {
@@ -306,7 +306,7 @@
                   orderKey: state.orderKey,
                   checkoutSession: newCheckoutSession,
                 });
-                console.log("[YUNO] PAYMENT_RETRY — checkout session updated:", newCheckoutSession);
+                // Session updated successfully
               } catch (e) {
                 console.error("[YUNO] PAYMENT_RETRY — failed to update checkout session", e);
               } finally {
@@ -342,17 +342,12 @@
           cardholderName: {
             required: true
           },
-          onChange: ({ error, data, isDirty }) => {
-            console.log("[YUNO] card.onChange →", { error, data, isDirty });
-          }
+          onChange: () => {}
         },
         /**
          * Called when user selects a payment method
-         * In seamless SDK, must call mountSeamlessCheckout with the selected type
          */
         yunoPaymentMethodSelected: (data) => {
-          console.log("[YUNO] yunoPaymentMethodSelected →", data);
-
           state.selectedPaymentMethod = data?.type;
 
           // Show Pay button now that a method is selected
@@ -365,92 +360,63 @@
          * We confirm the Woo order by verifying with our backend.
          */
         yunoPaymentResult: async (result) => {
-          // result is a plain status string from the Yuno SDK
-          const paymentStatus = typeof result === 'string' ? result : String(result || '');
-          console.log("[YUNO] yunoPaymentResult →", paymentStatus);
-
-          // ── PENDING (3DS / async flow in progress) ─────────────────────────
-          // Hide overlay so the 3DS modal remains visible and interactable.
-          if (PENDING_STATUSES.includes(paymentStatus)) {
-            hideProcessingOverlay();
-            console.log("[YUNO] Payment PENDING — staying on page for 3DS/authentication flow...");
-            try {
-              const confirmRes = await confirmOrder({
-                orderId: state.orderId,
-                orderKey: state.orderKey,
-                paymentStatus,
-              });
-              if (confirmRes?.pending) {
-                console.log("[YUNO] Backend confirmed PENDING, SDK continues handling flow");
-                return;
-              }
-              // If backend unexpectedly returns ok+redirect, honour it
-              if (confirmRes?.ok && confirmRes?.redirect) {
-                window.location.href = confirmRes.redirect;
-                return;
-              }
-            } catch (e) {
-              console.error("[YUNO] confirmOrder error (PENDING)", e);
-            }
-            return;
-          }
-
-          // Ensure overlay is showing (covers edge case where yunoPaymentResult
-          // fires without a prior onLoading ONE_TIME_TOKEN/CREATE_PAYMENT event)
+          // Show processing overlay for all statuses
           showProcessingOverlay();
 
-          // ── SUCCESS (SUCCEEDED or VERIFIED) ────────────────────────────────
-          if (SUCCESS_STATUSES.includes(paymentStatus)) {
-            try {
-              const confirmRes = await confirmOrder({
-                orderId: state.orderId,
-                orderKey: state.orderKey,
-                paymentStatus,
-              });
+          const paymentStatus = typeof result === 'string' ? result : String(result || '');
+          const isPositive = SUCCESS_STATUSES.includes(paymentStatus) || PENDING_STATUSES.includes(paymentStatus);
+          const isFailure = FAILURE_STATUSES.includes(paymentStatus);
 
-              if (confirmRes?.ok) {
-                if (confirmRes.pending) {
-                  console.log("[YUNO] Payment is PENDING, staying on page for async flow...");
+          // Confirm with backend (all branches call confirmOrder)
+          let confirmRes = null;
+          try {
+            confirmRes = await confirmOrder({
+              orderId: state.orderId,
+              orderKey: state.orderKey,
+              paymentStatus,
+            });
+          } catch (e) {
+            const logFn = isFailure ? console.warn : console.error;
+            logFn(`[YUNO] confirmOrder error (${paymentStatus})`, e);
+          }
+
+          // Handle success/pending confirmation
+          if (isPositive && confirmRes?.ok) {
+            state.paid = true;
+            if (confirmRes.redirect) {
+              try {
+                const rUrl = new URL(confirmRes.redirect, window.location.origin);
+                if (rUrl.origin === window.location.origin) {
+                  window.location.href = rUrl.href;
                   return;
                 }
-                state.paid = true;
-                if (confirmRes.redirect) {
-                  window.location.href = confirmRes.redirect;
-                  return;
-                }
-                window.location.reload();
-                return;
-              }
-
-              if (confirmRes?.failed) {
-                console.warn("[YUNO] SDK reported SUCCESS but backend verification says FAILED. Hiding overlay — SDK retry mechanism will handle recovery.");
-                hideProcessingOverlay();
-                setPayButtonDisabled(false);
-                return;
-              }
-            } catch (e) {
-              console.error("[YUNO] confirmOrder error (SUCCESS)", e);
+              } catch { /* ignore invalid redirect */ }
             }
+            window.location.reload();
             return;
           }
 
-          // ── FAILURE (REJECTED, DECLINED, CANCELED, ERROR, EXPIRED) ─────────
-          if (FAILURE_STATUSES.includes(paymentStatus)) {
-            try {
-              await confirmOrder({
-                orderId: state.orderId,
-                orderKey: state.orderKey,
-                paymentStatus,
-              });
-            } catch (e) {
-              console.warn("[YUNO] confirmOrder error (FAILURE)", e);
-            }
-            hideProcessingOverlay();
-            setPayButtonDisabled(false);
+          // Handle backend disagreement (SDK said positive but backend says FAILED)
+          if (isPositive && confirmRes?.failed) {
+            console.warn("[YUNO] SDK reported positive status but backend verification says FAILED. Resetting SDK for retry.");
+            resetSdkState();
+            startYunoCheckout({ skipPreflight: true });
             return;
           }
 
-          // Unknown status — log a warning, allow retry
+          // Positive fallthrough (confirmRes neither ok nor failed) — return silently
+          if (isPositive) {
+            return;
+          }
+
+          // FAILURE: reset SDK and re-mount for a clean retry
+          if (isFailure) {
+            resetSdkState();
+            startYunoCheckout({ skipPreflight: true });
+            return;
+          }
+
+          // Unknown status fallback
           console.warn("[YUNO] Unknown payment status:", paymentStatus);
         },
 
@@ -467,23 +433,15 @@
           // Handle 3DS modal cancellation (user closed modal without completing)
           // SDK treats this as a failure and fires PAYMENT_RETRY with a new checkout session
           if (error === 'CANCELED_BY_USER') {
-            console.log("[YUNO] 3DS canceled by user — waiting for SDK PAYMENT_RETRY to handle recovery.");
             setPayButtonDisabled(false);
             return;
           }
 
-          console.log("[YUNO] hideLoader (yunoError)");
           yunoInstance?.hideLoader();
         },
 
-        // Modal events: track 3DS and other modal interactions
-        yunoModalOpened: (data) => {
-          console.log("[YUNO] yunoModalOpened →", data);
-        },
-
-        yunoModalClosed: (data) => {
-          console.log("[YUNO] yunoModalClosed →", data);
-        },
+        yunoModalOpened: () => {},
+        yunoModalClosed: () => {},
       });
 
       yunoInstance.mountSeamlessCheckout();
@@ -491,16 +449,15 @@
 
       // Show button now that SDK is mounted; onLoading controls disabled state
       setPayButtonVisible(true);
-      console.log("[YUNO] startSeamlessCheckout ✓ — checkout mounted");
     } catch (e) {
       console.error("[YUNO] startYunoCheckout error", e);
     } finally {
       state.starting = false;
+      hideProcessingOverlay();
     }
   }
 
   async function handlePayClick(e) {
-    console.log('[YUNO] handlePayClick →', { target: e.target });
     const btn = resolvePayButtonTarget(e);
     if (!btn) return;
 
@@ -550,7 +507,6 @@
 
     // Prevent Enter key from submitting with invalid fields
     document.addEventListener("keydown", handleKeyPress, true);  // true = capture phase
-    document.addEventListener("keypress", handleKeyPress, true);  // Backup for older browsers
   }
 
   // Prefer event, keep fallback
