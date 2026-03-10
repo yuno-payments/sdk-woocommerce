@@ -365,8 +365,8 @@ body.woocommerce-checkout .wc_payment_method label {
   color: inherit !important;
 }
 
-/* Add card icon before Yuno Card label */
-body.woocommerce-checkout .wc_payment_method.payment_method_yuno_card label::before {
+/* Add card icon before Yuno label */
+body.woocommerce-checkout .wc_payment_method.payment_method_yuno label::before {
   content: "💳" !important;
   font-size: 18px !important;
   display: inline-block !important;

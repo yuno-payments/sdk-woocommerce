@@ -1,25 +1,44 @@
 <?php
 /**
- * Plugin Name: Yuno WooCommerce Gateway
- * Description: Accept payments with Yuno - cards, wallets, and local payment methods.
- * Version: 0.5.2
+ * Plugin Name:       Yuno Payment Gateway
+ * Plugin URI:        https://www.y.uno/
+ * Description:       Accept payments through Yuno's payment orchestration platform.
+ * Version:           1.0.0
+ * Requires at least: 6.0
+ * Requires PHP:      7.4
+ * Author:            Yuno
+ * Author URI:        https://www.y.uno/
+ * License:           GPL v2 or later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain:       yuno-payment-gateway
+ * Domain Path:       /languages
+ * Requires Plugins:  woocommerce
+ * WC requires at least: 8.0
+ * WC tested up to:      9.5
  */
 
 if (!defined('ABSPATH')) exit;
 
-// Define plugin version constant for asset versioning
-define('YUNO_WC_VERSION', '0.5.2');
-define('YUNO_GATEWAY_ID', 'yuno_card');
+define('YUNO_WC_VERSION', '1.0.0');
+define('YUNO_GATEWAY_ID', 'yuno');
 define('YUNO_STATUS_SUCCESS', ['SUCCEEDED', 'VERIFIED', 'APPROVED', 'PAYED']);
 define('YUNO_STATUS_FAILURE', ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED']);
 define('YUNO_STATUS_PENDING', ['PENDING', 'PROCESSING', 'REQUIRES_ACTION']);
 define('YUNO_DEFAULT_COUNTRY', 'CO');
+define('YUNO_PLUGIN_FILE', __FILE__);
+define('YUNO_PLUGIN_DIR', plugin_dir_path(__FILE__));
+define('YUNO_PLUGIN_URL', plugin_dir_url(__FILE__));
 
-// Declare block checkout compatibility
+// Declare WooCommerce feature compatibility
 add_action('before_woocommerce_init', function () {
     if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
         \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility(
             'cart_checkout_blocks',
+            __FILE__,
+            true
+        );
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility(
+            'custom_order_tables',
             __FILE__,
             true
         );
@@ -32,7 +51,7 @@ add_action('woocommerce_blocks_loaded', function () {
         return;
     }
 
-    require_once plugin_dir_path(__FILE__) . 'includes/class-wc-gateway-yuno-blocks.php';
+    require_once YUNO_PLUGIN_DIR . 'includes/class-wc-gateway-yuno-blocks.php';
 
     add_action(
         'woocommerce_blocks_payment_method_type_registration',
@@ -49,12 +68,12 @@ add_action('plugins_loaded', function () {
   }
 
   // Load the gateway class
-  require_once plugin_dir_path(__FILE__) . 'includes/class-wc-gateway-yuno-card.php';
-  require_once plugin_dir_path(__FILE__) . 'includes/rest-api.php';
+  require_once YUNO_PLUGIN_DIR . 'includes/class-wc-gateway-yuno.php';
+  require_once YUNO_PLUGIN_DIR . 'includes/rest-api.php';
 
   // Payment Gateway Registration
   add_filter('woocommerce_payment_gateways', function ($gateways) {
-    $gateways[] = 'WC_Gateway_Yuno_Card';
+    $gateways[] = 'WC_Gateway_Yuno';
     return $gateways;
   });
 

@@ -3,7 +3,7 @@ import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 import { createElement, useEffect } from '@wordpress/element';
 
-const settings = getSetting('yuno_card_data', {});
+const settings = getSetting('yuno_data', {});
 const title    = decodeEntities(settings.title || 'Yuno');
 
 const Label = () => createElement(
@@ -61,7 +61,7 @@ const Edit = () => createElement('div', null,
 );
 
 registerPaymentMethod({
-    name: 'yuno_card',
+    name: 'yuno',
     label: createElement(Label),
     content: createElement(Content),
     edit: createElement(Edit),

@@ -4,15 +4,21 @@
 
 WordPress plugin that integrates **Yuno Payments** as a WooCommerce payment gateway. It uses the **Yuno Web SDK** (v1.5) for frontend payment collection and a PHP REST API layer for server-side payment lifecycle management.
 
-- **Plugin version:** 0.5.2
-- **Gateway ID:** `yuno_card` (defined as `YUNO_GATEWAY_ID` constant)
-- **PHP:** 8.2+ | **WordPress:** 5.0+ | **WooCommerce:** 5.0+
+- **Plugin version:** 1.0.0
+- **Plugin slug:** `yuno-payment-gateway`
+- **Gateway ID:** `yuno` (defined as `YUNO_GATEWAY_ID` constant)
+- **Text domain:** `yuno-payment-gateway`
+- **License:** GPLv2 or later
+- **PHP:** 7.4+ | **WordPress:** 6.0+ | **WooCommerce:** 8.0+
 
 ### Global Constants (defined in `yuno-woocommerce.php`)
 
 | Constant | Value | Usage |
 |----------|-------|-------|
-| `YUNO_GATEWAY_ID` | `'yuno_card'` | Gateway ID used everywhere (except class property defaults — PHP limitation) |
+| `YUNO_GATEWAY_ID` | `'yuno'` | Gateway ID used everywhere |
+| `YUNO_PLUGIN_FILE` | `__FILE__` | Main plugin file path |
+| `YUNO_PLUGIN_DIR` | `plugin_dir_path(__FILE__)` | Plugin directory path |
+| `YUNO_PLUGIN_URL` | `plugin_dir_url(__FILE__)` | Plugin URL |
 | `YUNO_STATUS_SUCCESS` | `['SUCCEEDED','VERIFIED','APPROVED','PAYED']` | Payment success statuses |
 | `YUNO_STATUS_FAILURE` | `['REJECTED','DECLINED','CANCELLED','ERROR','EXPIRED','FAILED']` | Payment failure statuses |
 | `YUNO_STATUS_PENDING` | `['PENDING','PROCESSING','REQUIRES_ACTION']` | Payment pending statuses |
@@ -51,7 +57,7 @@ sdk-woocommerce/
 │   ├── package.json                      # Build tooling (@wordpress/scripts)
 │   ├── webpack.config.js                 # Custom webpack config (WC externals)
 │   ├── includes/
-│   │   ├── class-wc-gateway-yuno-card.php  # WC_Payment_Gateway subclass
+│   │   ├── class-wc-gateway-yuno.php  # WC_Payment_Gateway subclass
 │   │   ├── class-wc-gateway-yuno-blocks.php # AbstractPaymentMethodType (block checkout)
 │   │   └── rest-api.php                    # All REST endpoints + webhook (~2400 lines)
 │   ├── src/
@@ -76,7 +82,7 @@ sdk-woocommerce/
 WooCommerce Checkout
         │ process_payment() → redirect to order-pay page
         ▼
-class-wc-gateway-yuno-card.php
+class-wc-gateway-yuno.php
         │ enqueue_scripts() → loads Yuno SDK + api.js + checkout.js
         │ wp_localize_script() → injects YUNO_WC config object
         ▼
@@ -116,7 +122,7 @@ Yuno API (https://api[-env].y.uno)
 | File | Responsibility |
 |------|---------------|
 | `yuno-woocommerce.php` | Registers gateway via `woocommerce_payment_gateways`, order status filter (physical vs downloadable/virtual), block checkout registration, `cart_checkout_blocks` compatibility declaration |
-| `class-wc-gateway-yuno-card.php` | Admin settings UI, script enqueuing, `process_payment()`, `receipt_page()`, split config validation |
+| `class-wc-gateway-yuno.php` | Admin settings UI, script enqueuing, `process_payment()`, `receipt_page()`, split config validation |
 | `class-wc-gateway-yuno-blocks.php` | `AbstractPaymentMethodType` — registers Yuno with WC Blocks payment method registry |
 | `rest-api.php` | REST routes, customer creation, checkout session, confirm, webhook handling |
 | `api.js` | `getPublicApiKey`, `getCheckoutSession`, `createCustomer`, `confirmOrder`, `checkOrderStatus`, `duplicateOrder` |
@@ -171,10 +177,10 @@ Yuno API (https://api[-env].y.uno)
 
 ### WordPress Conventions
 - **HPOS-compatible queries** — use `wc_get_orders(['meta_key' => ..., 'meta_value' => ...])` instead of direct `$wpdb` queries for order lookups.
-- **Settings retrieval** — use `yuno_get_env($key, $default)` which checks WP options → environment variables → PHP constants in that priority order. The WP option key is `woocommerce_yuno_card_settings` (auto-derived from `$this->id = 'yuno_card'` by `WC_Settings_API`). Uses static caching for the settings array and key map (per-request).
+- **Settings retrieval** — use `yuno_get_env($key, $default)` which checks WP options → environment variables → PHP constants in that priority order. The WP option key is `woocommerce_yuno_settings` (auto-derived from `$this->id = 'yuno'` by `WC_Settings_API`). Uses static caching for the settings array and key map (per-request).
 - **Variable naming** — all PHP variables use `snake_case`. No camelCase variables in PHP code.
 - **No frontend form fields** — Yuno SDK owns all payment field rendering. WC fields are billing/shipping info only.
-- **Checkout field validation** — `validate_checkout_fields()` in `class-wc-gateway-yuno-card.php` requires at least first OR last name, email, and valid phone. Phone is formatted via `yuno_format_phone_number($phone, $country)` which returns `{ country_code, number }`. Error messages are in Spanish.
+- **Checkout field validation** — `validate_checkout_fields()` in `class-wc-gateway-yuno.php` requires at least first OR last name, email, and valid phone. Phone is formatted via `yuno_format_phone_number($phone, $country)` which returns `{ country_code, number }`. Error messages are in Spanish.
 
 ### Frontend (checkout.js)
 - **`startYunoCheckout()`** — guarded by `state.starting || state.started`; parallelizes `createCustomer()` and `getPublicApiKey()` via `Promise.all`, then creates checkout session, calls `startSeamlessCheckout()`, then `mountSeamlessCheckout()`. The `publicApiKey` is injected server-side via `YUNO_WC`, eliminating an extra REST call when available.
@@ -273,7 +279,7 @@ All data stored on WC orders under these meta keys:
 
 ## Configuration
 
-All settings stored in `woocommerce_yuno_card_settings` WP option (key auto-derived by WooCommerce from `$this->id = 'yuno_card'`). Managed via:
+All settings stored in `woocommerce_yuno_settings` WP option (key auto-derived by WooCommerce from `$this->id = 'yuno'`). Managed via:
 `WooCommerce → Settings → Payments → Yuno`
 
 | Setting key | Description |
@@ -333,7 +339,7 @@ Both flows converge at the order-pay page — no duplicate payment logic.
 
 - **`class-wc-gateway-yuno-blocks.php`** — `AbstractPaymentMethodType` implementation. Methods: `initialize()`, `is_active()`, `get_payment_method_script_handles()`, `get_payment_method_data()`.
 - **`src/blocks/yuno-blocks.js`** — React component that calls `registerPaymentMethod()`. Registers `onPaymentSetup` returning SUCCESS with empty `paymentMethodData` (WC Blocks handles the redirect).
-- **Settings data key** — `getSetting('yuno_card_data')` (derived from `protected $name = 'yuno_card'`).
+- **Settings data key** — `getSetting('yuno_data')` (derived from `protected $name = 'yuno'`).
 
 ### Registration Flow
 

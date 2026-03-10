@@ -1,7 +1,7 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
+class WC_Gateway_Yuno extends WC_Payment_Gateway {
 
   public function __construct() {
     $this->id                 = YUNO_GATEWAY_ID;
@@ -107,7 +107,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
     // Validate name (first name OR last name required for customer name)
     if (empty($billing_first_name) && empty($billing_last_name)) {
-      $errors->add('validation', 'Por favor ingresa tu nombre para procesar el pago con Yuno.');
+      $errors->add('validation', esc_html__('Please enter your name to process the payment with Yuno.', 'yuno-payment-gateway'));
       yuno_log('warning', 'Checkout validation: missing name', [
         'billing_first_name' => $billing_first_name,
         'billing_last_name'  => $billing_last_name,
@@ -116,7 +116,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
     // Validate email (required for Yuno Customer)
     if (empty($billing_email)) {
-      $errors->add('validation', 'Por favor ingresa tu email para procesar el pago con Yuno.');
+      $errors->add('validation', esc_html__('Please enter your email to process the payment with Yuno.', 'yuno-payment-gateway'));
       yuno_log('warning', 'Checkout validation: missing email');
     }
 
@@ -128,7 +128,8 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       if (empty($formatted_phone)) {
         // Phone couldn't be formatted (either country not supported or invalid format)
         $errors->add('validation', sprintf(
-          'El número de teléfono no es válido para el país seleccionado (%s). Por favor verifica el número o selecciona un país diferente.',
+          /* translators: %s: billing country code */
+          esc_html__('The phone number is not valid for the selected country (%s). Please verify the number or select a different country.', 'yuno-payment-gateway'),
           $billing_country
         ));
         yuno_log('warning', 'Checkout validation: invalid phone', [
@@ -322,7 +323,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
    * Settings helpers for rest-api.php
    */
   public static function get_settings_array() {
-    $opt = get_option('woocommerce_yuno_card_settings', []);
+    $opt = get_option('woocommerce_' . YUNO_GATEWAY_ID . '_settings', []);
     return is_array($opt) ? $opt : [];
   }
 
@@ -371,7 +372,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $order = wc_get_order($order_id);
 
     if (!$order) {
-      echo '<p>' . esc_html__('Order not found.', 'yuno') . '</p>';
+      echo '<p>' . esc_html__('Order not found.', 'yuno-payment-gateway') . '</p>';
       return;
     }
 
@@ -411,57 +412,57 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $payment_method_title = $this->get_title();
 
     echo '<div class="yuno-receipt">';
-    echo '<h2 class="yuno-page-title">' . esc_html__('Yuno-SDK plugin', 'yuno') . '</h2>';
+    echo '<h2 class="yuno-page-title">' . esc_html__('Yuno-SDK plugin', 'yuno-payment-gateway') . '</h2>';
     echo '<div class="yuno-order-summary">';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Order:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Order:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value" id="yuno-order-number">#' . esc_html($order_number) . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Date:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Date:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value">' . esc_html($order_date) . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Total:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Total:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value yuno-order-total" id="yuno-order-total">' . $total_html . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Payment Method:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Payment Method:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value">' . esc_html($payment_method_title) . '</span>';
     echo '</div>';
 
     echo '</div>';
 
     echo '<div class="yuno-payment-info">';
-    echo '<h3 class="yuno-payment-title">' . esc_html__('Pay with Yuno', 'yuno') . '</h3>';
+    echo '<h3 class="yuno-payment-title">' . esc_html__('Pay with Yuno', 'yuno-payment-gateway') . '</h3>';
     echo '<p class="yuno-payment-subtitle">' .
          sprintf(
-           esc_html__('Order #%s - Total: %s', 'yuno'),
+           esc_html__('Order #%s - Total: %s', 'yuno-payment-gateway'),
            esc_html($order_number),
            esc_html(strip_tags($total_html))
          ) .
          '</p>';
     echo '</div>';
 
-    echo '<div id="yuno-loader" class="yuno-loader" style="display:none;">' . esc_html__('Loading payment…', 'yuno') . '</div>';
+    echo '<div id="yuno-loader" class="yuno-loader" style="display:none;">' . esc_html__('Loading payment…', 'yuno-payment-gateway') . '</div>';
     echo '<div id="yuno-root"></div>';
     echo '<div id="yuno-apm-form"></div>';
     echo '<div id="yuno-action-form"></div>';
 
     echo '<button type="button" id="yuno-button-pay" class="yuno-pay-button" style="display:none;">' .
-         esc_html__('Pay', 'yuno') .
+         esc_html__('Pay', 'yuno-payment-gateway') .
          '</button>';
 
     // Server-rendered processing overlay — visible from first paint (CSS loads in <head>).
     // checkout.js showProcessingOverlay() skips creation if this element already exists.
     echo '<div id="yuno-processing-overlay" class="yuno-processing-overlay">';
     echo '<div class="yuno-processing-content">';
-    echo '<p class="yuno-processing-title">' . esc_html__('One moment, please...', 'yuno') . '</p>';
-    echo '<p class="yuno-processing-subtitle">' . esc_html__('We are processing your payment', 'yuno') . '</p>';
+    echo '<p class="yuno-processing-title">' . esc_html__('One moment, please...', 'yuno-payment-gateway') . '</p>';
+    echo '<p class="yuno-processing-subtitle">' . esc_html__('We are processing your payment', 'yuno-payment-gateway') . '</p>';
     echo '<div class="yuno-processing-bar-track"><div class="yuno-processing-bar-fill"></div></div>';
     echo '</div>';
     echo '</div>';

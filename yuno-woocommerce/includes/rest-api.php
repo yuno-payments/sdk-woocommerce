@@ -5,6 +5,13 @@ if (!defined('ABSPATH')) exit;
  * =========================
  * Routes
  * =========================
+ *
+ * Security model: Customer-facing endpoints use '__return_true' for the
+ * permission_callback because they are secured via WooCommerce order key
+ * validation — every handler calls yuno_get_order_from_request() which
+ * requires a valid order_key parameter. Only the order owner (who received
+ * the key via checkout redirect) can access their order's payment endpoints.
+ * The webhook endpoint uses HMAC signature verification instead.
  */
 
 add_action('rest_api_init', function () {

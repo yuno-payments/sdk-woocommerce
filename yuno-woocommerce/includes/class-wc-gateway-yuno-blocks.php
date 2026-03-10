@@ -5,7 +5,7 @@ use Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodTyp
 
 final class WC_Gateway_Yuno_Blocks_Support extends AbstractPaymentMethodType {
 
-    protected $name = 'yuno_card';
+    protected $name = 'yuno';
 
     private $gateway;
 
@@ -16,19 +16,19 @@ final class WC_Gateway_Yuno_Blocks_Support extends AbstractPaymentMethodType {
     }
 
     public function is_active() {
-        return $this->gateway instanceof WC_Gateway_Yuno_Card
+        return $this->gateway instanceof WC_Gateway_Yuno
             && $this->gateway->is_available();
     }
 
     public function get_payment_method_script_handles() {
-        $asset_path = plugin_dir_path(__DIR__) . 'assets/js/blocks/yuno-blocks.asset.php';
+        $asset_path = YUNO_PLUGIN_DIR . 'assets/js/blocks/yuno-blocks.asset.php';
         $asset      = file_exists($asset_path)
             ? require $asset_path
             : ['dependencies' => [], 'version' => YUNO_WC_VERSION];
 
         wp_register_script(
             'yuno-blocks-integration',
-            plugin_dir_url(__DIR__) . 'assets/js/blocks/yuno-blocks.js',
+            YUNO_PLUGIN_URL . 'assets/js/blocks/yuno-blocks.js',
             $asset['dependencies'],
             $asset['version'],
             true
@@ -39,7 +39,7 @@ final class WC_Gateway_Yuno_Blocks_Support extends AbstractPaymentMethodType {
 
     public function get_payment_method_data() {
         $default_description = 'Select your preferred payment method on the next step';
-        $plugin_url = plugin_dir_url(__DIR__);
+        $plugin_url = YUNO_PLUGIN_URL;
 
         return [
             'title'       => $this->gateway ? $this->gateway->get_title() : 'Yuno',
