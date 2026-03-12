@@ -34,10 +34,10 @@
     getCheckoutSession,
     getPublicApiKey,
     createCustomer,
+    createPayment,
     confirmOrder,
     checkOrderStatus,
     duplicateOrder,
-    updateCheckoutSession,
   } = window.YUNO_API;
 
   let yunoInstance = null;
@@ -52,9 +52,15 @@
     orderId: Number(yunoConfig.orderId || 0),
     orderKey: yunoConfig.orderKey || "",
 
-    checkoutSession: null,
     selectedPaymentMethod: null,
   };
+
+  const is3dsReturn = new URLSearchParams(window.location.search).has('yuno_3ds_return');
+  if (is3dsReturn) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('yuno_3ds_return');
+    history.replaceState(null, '', cleanUrl.href);
+  }
 
   const PAYMENT_STATUS = {
     SUCCEEDED: 'SUCCEEDED',
@@ -182,7 +188,7 @@
                         statusRes.is_failed ||
                         (statusRes.verified_status && FAILURE_STATUSES.includes(statusRes.verified_status));
 
-      if (hasFailed) {
+      if (hasFailed && !is3dsReturn) {
         try {
           const duplicateRes = await duplicateOrder({
             orderId: state.orderId,
@@ -284,48 +290,45 @@
 
       const countryCode = String(sessionRes?.country || yunoConfig.country || "CO");
 
-      await yunoInstance.startSeamlessCheckout({
-        checkoutSession: checkoutSession,
+      await yunoInstance.startCheckout({
+        checkoutSession,
         elementSelector: "#yuno-root",
         countryCode: countryCode,
         language: yunoConfig.language || "es", // Use WordPress language, fallback to Spanish
-        showLoading: true, // Disable SDK loader to prevent "One moment please" flash
+        showLoading: true,
         issuersFormEnable: true,
         showPaymentStatus: true,
-        onLoading: async ({ isLoading, type, data }) => {
-          // PAYMENT_RETRY: SDK signals that payment failed and provides a new checkout session.
-          // Update the stored session so subsequent confirmOrder() calls use the correct session.
-          if (type === 'PAYMENT_RETRY') {
-            hideProcessingOverlay();
-            setPayButtonDisabled(true);
-            const newCheckoutSession = data?.newCheckoutSession;
-            if (newCheckoutSession) {
-              try {
-                await updateCheckoutSession({
-                  orderId: state.orderId,
-                  orderKey: state.orderKey,
-                  checkoutSession: newCheckoutSession,
-                });
-                // Session updated successfully
-              } catch (e) {
-                console.error("[YUNO] PAYMENT_RETRY — failed to update checkout session", e);
-              } finally {
-                setPayButtonDisabled(false);
-              }
-            }
-            return;
-          }
-
-          if (isLoading && (type === 'ONE_TIME_TOKEN' || type === 'CREATE_PAYMENT')) {
+        onLoading: ({ isLoading, type }) => {
+          if (isLoading || (type === 'ONE_TIME_TOKEN' || type === 'CREATE_PAYMENT')) {
             setPayButtonDisabled(true);
             showProcessingOverlay();
-          } else if (!isLoading && (type === 'ONE_TIME_TOKEN' || type === 'CREATE_PAYMENT')) {
-            hideProcessingOverlay();
-          } else if (isLoading) {
-            setPayButtonDisabled(true);
-            hideProcessingOverlay();
           } else {
             setPayButtonDisabled(false);
+            hideProcessingOverlay();
+          }
+        },
+        /**
+         * Full SDK callback: application must create the payment via backend
+         * Called by SDK after tokenization, before payment can proceed.
+         * Must call continuePayment() when done (in finally block).
+         */
+        yunoCreatePayment: async (oneTimeToken) => {
+          if (state.paid) return;
+          setPayButtonDisabled(true);
+          showProcessingOverlay();
+          try {
+            await createPayment({
+              oneTimeToken,
+              checkoutSession,
+              orderId: state.orderId,
+              orderKey: state.orderKey,
+            });
+          } catch (e) {
+            console.error("[Yuno] Payment creation failed:", e);
+            setPayButtonDisabled(false);
+          } finally {
+            await yunoInstance.continuePayment({ showPaymentStatus: true });
+            hideProcessingOverlay();
           }
         },
         renderMode: {
@@ -355,7 +358,7 @@
         },
 
         /**
-         * Payment result from SDK UI flow (Seamless SDK handles payment internally)
+         * Payment result from SDK UI flow (Full SDK)
          * result is a status string: "SUCCEEDED", "PENDING", "REJECTED", etc.
          * We confirm the Woo order by verifying with our backend.
          */
@@ -428,32 +431,23 @@
             timestamp: new Date().toISOString()
           });
 
-          hideProcessingOverlay();
-
-          // Handle 3DS modal cancellation (user closed modal without completing)
-          // SDK treats this as a failure and fires PAYMENT_RETRY with a new checkout session
-          if (error === 'CANCELED_BY_USER') {
-            setPayButtonDisabled(false);
-            return;
-          }
-
+          resetSdkState();
+          startYunoCheckout({ skipPreflight: true });
           yunoInstance?.hideLoader();
-        },
 
-        yunoModalOpened: () => {},
-        yunoModalClosed: () => {},
+        },
       });
 
-      yunoInstance.mountSeamlessCheckout();
+      yunoInstance.mountCheckout();
       state.started = true;
 
       // Show button now that SDK is mounted; onLoading controls disabled state
       setPayButtonVisible(true);
+      hideProcessingOverlay();
     } catch (e) {
       console.error("[YUNO] startYunoCheckout error", e);
     } finally {
       state.starting = false;
-      hideProcessingOverlay();
     }
   }
 

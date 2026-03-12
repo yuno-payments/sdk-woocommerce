@@ -130,26 +130,26 @@ async function checkOrderStatus({ orderId, orderKey }) {
   return json;
 }
 
-async function updateCheckoutSession({ orderId, orderKey, checkoutSession }) {
+async function createPayment({ oneTimeToken, checkoutSession, orderId, orderKey }) {
   const REST_BASE = assertBase();
 
-  const res = await fetch(`${REST_BASE}/update-checkout-session`, {
-    method: 'POST',
-    headers: wpHeaders({ 'Content-Type': 'application/json' }),
+  const res = await fetch(`${REST_BASE}/payments`, {
+    method: "POST",
+    headers: wpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
-      order_id:         orderId,
-      order_key:        orderKey,
+      one_time_token: oneTimeToken,
       checkout_session: checkoutSession,
+      order_id: orderId,
+      order_key: orderKey,
     }),
   });
 
-  const json = await safeJson(res);
-
   if (!res.ok) {
-    throw new Error(`update-checkout-session failed: ${res.status} ${JSON.stringify(json)}`);
+    const text = await res.text();
+    throw new Error(`Payment creation failed: ${res.status}`);
   }
 
-  return json;
+  return safeJson(res);
 }
 
 async function duplicateOrder({ orderId, orderKey }) {
@@ -178,8 +178,8 @@ window.YUNO_API = {
   getPublicApiKey,
   getCheckoutSession,
   createCustomer,
+  createPayment,
   confirmOrder,
   checkOrderStatus,
   duplicateOrder,
-  updateCheckoutSession,
 };
