@@ -1258,6 +1258,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
         'order_id'        => $order_id,
         'session_id'      => $checkout_session,
         'verified_status' => $verified_status,
+        '$res'              => $res['raw'],
     ]);
 
     // 5. If payment is SUCCEEDED in Yuno, mark order as paid NOW
