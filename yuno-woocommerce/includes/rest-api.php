@@ -1057,50 +1057,75 @@ function yuno_confirm_order_payment(WP_REST_Request $request) {
         ], 200);
     }
 
-    // PENDING/PROCESSING/REQUIRES_ACTION — with auto-capture enabled,
-    // these mean the payment is authorized and capture happens automatically on Yuno's side.
-    // Treat as successful: call payment_complete() same as SUCCESS.
+    // PENDING/PROCESSING/REQUIRES_ACTION — check sub_status to determine if payment is authorized
+    // AUTHORIZED sub_status means payment succeeded (auto-capture), treat as successful.
+    // Other sub_statuses (WAITING_ADDITIONAL_STEP, IN_PROCESS, etc.) mean payment is still in progress.
     if (in_array($verified_status, YUNO_STATUS_PENDING, true)) {
-        if (yuno_debug_enabled()) {
-            $order_items_debug = [];
-            foreach ($order->get_items() as $item) {
-                $product = $item->get_product();
-                if ($product) {
-                    $order_items_debug[] = [
-                        'name'            => $product->get_name(),
-                        'is_virtual'      => $product->is_virtual() ? 'YES' : 'NO',
-                        'is_downloadable' => $product->is_downloadable() ? 'YES' : 'NO',
-                        'needs_shipping'  => $product->needs_shipping() ? 'YES' : 'NO',
-                    ];
+        $sub_status = strtoupper(trim((string) ($res['raw']['sub_status'] ?? '')));
+
+        yuno_log('info', 'Confirm: PENDING status with sub_status', [
+            'order_id'   => $order->get_id(),
+            'session_id' => $checkout_session,
+            'status'     => $verified_status,
+            'sub_status' => $sub_status,
+        ]);
+
+        // AUTHORIZED sub_status: payment is authorized, capture happens automatically
+        if ($sub_status === 'AUTHORIZED') {
+            if (yuno_debug_enabled()) {
+                $order_items_debug = [];
+                foreach ($order->get_items() as $item) {
+                    $product = $item->get_product();
+                    if ($product) {
+                        $order_items_debug[] = [
+                            'name'            => $product->get_name(),
+                            'is_virtual'      => $product->is_virtual() ? 'YES' : 'NO',
+                            'is_downloadable' => $product->is_downloadable() ? 'YES' : 'NO',
+                            'needs_shipping'  => $product->needs_shipping() ? 'YES' : 'NO',
+                        ];
+                    }
                 }
+
+                yuno_log('info', 'Confirm: order product analysis BEFORE payment_complete() [PENDING/AUTHORIZED]', [
+                    'order_id'         => $order->get_id(),
+                    'needs_shipping'   => $order->needs_shipping_address() ? 'YES' : 'NO',
+                    'needs_processing' => $order->needs_processing() ? 'YES' : 'NO',
+                    'has_downloadable' => $order->has_downloadable_item() ? 'YES' : 'NO',
+                    'products'         => $order_items_debug,
+                    'current_status'   => $order->get_status(),
+                ]);
             }
 
-            yuno_log('info', 'Confirm: order product analysis BEFORE payment_complete() [PENDING]', [
-                'order_id'         => $order->get_id(),
-                'needs_shipping'   => $order->needs_shipping_address() ? 'YES' : 'NO',
-                'needs_processing' => $order->needs_processing() ? 'YES' : 'NO',
-                'has_downloadable' => $order->has_downloadable_item() ? 'YES' : 'NO',
-                'products'         => $order_items_debug,
-                'current_status'   => $order->get_status(),
-            ]);
+            $order->payment_complete();
+            $order->add_order_note('Yuno payment authorized (pending capture). status=' . $verified_status . ' sub_status=' . $sub_status . ' session=' . $checkout_session);
+
+            if (yuno_debug_enabled()) {
+                yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete() [PENDING/AUTHORIZED]', [
+                    'order_id'                      => $order->get_id(),
+                    'session_id'                    => $checkout_session,
+                    'status_after_payment_complete' => $order->get_status(),
+                ]);
+            }
+
+            return yuno_json([
+                'ok'        => true,
+                'order_id'  => $order->get_id(),
+                'new_status'=> $order->get_status(),
+                'redirect'  => $order->get_checkout_order_received_url(),
+            ], 200);
         }
 
-        $order->payment_complete();
-        $order->add_order_note('Yuno payment authorized (pending capture). status=' . $verified_status . ' session=' . $checkout_session);
-
-        if (yuno_debug_enabled()) {
-            yuno_log('info', 'Confirm: order marked as paid AFTER payment_complete() [PENDING]', [
-                'order_id'                      => $order->get_id(),
-                'session_id'                    => $checkout_session,
-                'status_after_payment_complete' => $order->get_status(),
-            ]);
-        }
+        // Non-AUTHORIZED sub_status: payment still in progress (3DS, OTP, fraud review, etc.)
+        // Do NOT call payment_complete() — webhook will finalize the order later
+        $order->add_order_note('Yuno payment pending additional steps. status=' . $verified_status . ' sub_status=' . $sub_status . ' session=' . $checkout_session);
 
         return yuno_json([
-            'ok'        => true,
-            'order_id'  => $order->get_id(),
-            'new_status'=> $order->get_status(),
-            'redirect'  => $order->get_checkout_order_received_url(),
+            'ok'                 => true,
+            'pending'            => true,
+            'order_id'           => $order->get_id(),
+            'new_status'         => $order->get_status(),
+            'verified_status'    => $verified_status,
+            'verified_sub_status'=> $sub_status,
         ], 200);
     }
 }
@@ -1257,8 +1282,7 @@ function yuno_check_order_status(WP_REST_Request $request) {
     yuno_log('info', 'Check order status: Yuno verification result', [
         'order_id'        => $order_id,
         'session_id'      => $checkout_session,
-        'verified_status' => $verified_status,
-        '$res'              => $res['raw'],
+        'verified_status' => $verified_status
     ]);
 
     // 5. If payment is SUCCEEDED in Yuno, mark order as paid NOW
@@ -1309,8 +1333,48 @@ function yuno_check_order_status(WP_REST_Request $request) {
         ], 200);
     }
 
-    // 7. Payment is PENDING/PROCESSING/UNKNOWN — allow retry, webhook will confirm later
-    yuno_log('info', 'Check order status: Payment in intermediate state, allowing retry', [
+    // 7. Payment is PENDING — check sub_status to determine behavior
+    if (in_array($verified_status, YUNO_STATUS_PENDING, true)) {
+        $sub_status = strtoupper(trim((string) ($res['raw']['sub_status'] ?? '')));
+
+        yuno_log('info', 'Check order status: PENDING with sub_status', [
+            'order_id'   => $order_id,
+            'session_id' => $checkout_session,
+            'status'     => $verified_status,
+            'sub_status' => $sub_status,
+        ]);
+
+        // AUTHORIZED: payment succeeded, treat same as SUCCESS
+        if ($sub_status === 'AUTHORIZED') {
+            $order->payment_complete();
+            $order->add_order_note('Yuno payment confirmed via check-order-status (PENDING/AUTHORIZED). status=' . $verified_status . ' sub_status=' . $sub_status . ' session=' . $checkout_session);
+
+            $redirect = $order->get_checkout_order_received_url();
+
+            return yuno_json([
+                'is_paid'              => true,
+                'status'               => $order->get_status(),
+                'redirect'             => $redirect,
+                'message'              => 'Payment already processed',
+                'verified_by'          => 'yuno_api',
+                'verified_status'      => $verified_status,
+                'verified_sub_status'  => $sub_status,
+            ], 200);
+        }
+
+        // Non-AUTHORIZED: payment still in progress, don't redirect
+        return yuno_json([
+            'is_paid'              => false,
+            'is_pending'           => true,
+            'status'               => $status,
+            'message'              => 'Payment is being processed',
+            'verified_status'      => $verified_status,
+            'verified_sub_status'  => $sub_status,
+        ], 200);
+    }
+
+    // 8. UNKNOWN/other status — allow SDK init for retry
+    yuno_log('info', 'Check order status: Payment in unknown state, allowing retry', [
         'order_id'   => $order_id,
         'session_id' => $checkout_session,
         'status'     => $verified_status,
@@ -1320,7 +1384,6 @@ function yuno_check_order_status(WP_REST_Request $request) {
         'is_paid'             => false,
         'status'              => $status,
         'has_checkout_session'=> !empty($checkout_session),
-        'redirect'            => $order->get_checkout_order_received_url(),
         'message'             => 'Order ready for payment',
         'verified_status'     => $verified_status,
     ], 200);

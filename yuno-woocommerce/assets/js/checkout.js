@@ -183,6 +183,12 @@
         return false;
       }
 
+      // Payment still in progress (e.g. 3DS, OTP) — show overlay, don't init SDK
+      if (statusRes.is_pending) {
+        showProcessingOverlay();
+        return false;
+      }
+
       // If order payment previously failed, auto-duplicate so the user can retry
       const hasFailed = statusRes.should_duplicate ||
                         statusRes.is_failed ||
@@ -385,6 +391,11 @@
 
           // Handle success/pending confirmation
           if (isPositive && confirmRes?.ok) {
+            // Payment still processing (e.g. 3DS in progress), don't redirect
+            if (confirmRes.pending) {
+              showProcessingOverlay();
+              return;
+            }
             state.paid = true;
             if (confirmRes.redirect) {
               try {
