@@ -412,7 +412,6 @@ class WC_Gateway_Yuno extends WC_Payment_Gateway {
     $payment_method_title = $this->get_title();
 
     echo '<div class="yuno-receipt">';
-    echo '<h2 class="yuno-page-title">' . esc_html__('Yuno-SDK plugin', 'yuno-payment-gateway') . '</h2>';
     echo '<div class="yuno-order-summary">';
 
     echo '<div class="yuno-order-item">';

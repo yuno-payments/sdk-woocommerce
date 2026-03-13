@@ -53,47 +53,43 @@ msgstr ""
 msgid "Order not found."
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:415
-msgid "Yuno-SDK plugin"
-msgstr ""
-
-#: includes/class-wc-gateway-yuno.php:419
+#: includes/class-wc-gateway-yuno.php:414
 msgid "Order:"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:424
+#: includes/class-wc-gateway-yuno.php:423
 msgid "Date:"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:429
+#: includes/class-wc-gateway-yuno.php:428
 msgid "Total:"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:434
+#: includes/class-wc-gateway-yuno.php:433
 msgid "Payment Method:"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:441
+#: includes/class-wc-gateway-yuno.php:440
 msgid "Pay with Yuno"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:444
+#: includes/class-wc-gateway-yuno.php:443
 #, php-format
 msgid "Order #%s - Total: %s"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:451
+#: includes/class-wc-gateway-yuno.php:450
 msgid "Loading payment…"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:457
+#: includes/class-wc-gateway-yuno.php:456
 msgid "Pay"
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:464
+#: includes/class-wc-gateway-yuno.php:463
 msgid "One moment, please..."
 msgstr ""
 
-#: includes/class-wc-gateway-yuno.php:465
+#: includes/class-wc-gateway-yuno.php:464
 msgid "We are processing your payment"
 msgstr ""
