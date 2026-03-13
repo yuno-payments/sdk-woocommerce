@@ -43,6 +43,7 @@ npm run env:clean    # Reset WordPress to clean state
 - **WordPress URL:** http://localhost:8888
 - **Default credentials:** `admin` / `password`
 - **Plugin:** `./yuno-woocommerce` is auto-installed and activated
+- **WooCommerce:** not included in `.wp-env.json` — must be installed manually in the dev environment
 - **WP_DEBUG:** enabled, logs to `wp-content/debug.log`
 
 ---
@@ -55,21 +56,30 @@ sdk-woocommerce/
 │   └── workflows/
 │       └── deploy-to-wporg.yml           # WordPress.org deployment pipeline
 ├── .wp-env.json                          # wp-env Docker/WordPress config
+├── Dockerfile                            # PHP 8.2 Apache image (soap, mysqli, pdo)
 ├── package.json                          # npm scripts for wp-env
 ├── yuno-woocommerce/
 │   ├── yuno-woocommerce.php              # Plugin bootstrap (entry point)
+│   ├── uninstall.php                     # Cleanup on plugin deletion (deletes settings)
 │   ├── package.json                      # Build tooling (@wordpress/scripts)
 │   ├── webpack.config.js                 # Custom webpack config (WC externals)
 │   ├── readme.txt                        # WordPress.org plugin directory readme
+│   ├── LICENSE                           # GPLv2 full license text
+│   ├── .gitattributes                    # export-ignore rules for git archive ZIPs
 │   ├── includes/
 │   │   ├── class-wc-gateway-yuno.php     # WC_Payment_Gateway subclass
 │   │   ├── class-wc-gateway-yuno-blocks.php # AbstractPaymentMethodType (block checkout)
-│   │   └── rest-api.php                  # All REST endpoints + webhook (~2400 lines)
+│   │   └── rest-api.php                  # All REST endpoints + webhook (~2500 lines)
 │   ├── src/
 │   │   └── blocks/
 │   │       └── yuno-blocks.js            # Block checkout React source
 │   ├── languages/
 │   │   └── yuno-payment-gateway.pot      # Translation template
+│   ├── wordpress_org_assets/             # WordPress.org directory marketing assets
+│   │   ├── banner-1544x500.png           # Plugin banner (hi-res)
+│   │   ├── banner-772x250.png            # Plugin banner (standard)
+│   │   ├── icon-128x128.png              # Plugin icon (standard)
+│   │   └── icon-256x256.png              # Plugin icon (hi-res)
 │   └── assets/
 │       ├── js/
 │       │   ├── api.js                    # Frontend REST bridge (fetch wrappers)
@@ -78,7 +88,7 @@ sdk-woocommerce/
 │       │       ├── yuno-blocks.js        # GENERATED — compiled React
 │       │       └── yuno-blocks.asset.php # GENERATED — dependency manifest
 │       ├── css/
-│       │   └── checkout.css              # Theme isolation + SDK container styles
+│       │   └── checkout.css              # Theme isolation + SDK container styles + processing overlay
 │       └── images/                       # Payment method icons
 │           ├── credit-card.svg           # Generic card icon (gateway icon)
 │           ├── visa.svg                  # Card brand SVGs
@@ -127,7 +137,7 @@ Yuno API (https://api[-env].y.uno)
 7. Pay button shown after `yunoPaymentMethodSelected` fires; user interacts with mounted SDK form
 8. User clicks Pay → `yunoInstance.startPayment()` → SDK tokenizes → `yunoCreatePayment(oneTimeToken)` callback fires → backend POST `/yuno/v1/payments` creates payment via Yuno API → `continuePayment()` resumes SDK flow
 9. `yunoPaymentResult(result)` callback fires with a status string → `confirmOrder()` → POST `/yuno/v1/confirm` verifies with Yuno API
-10. SUCCESS → redirect to `/order-received`; FAILURE → `resetSdkState()` + `startYunoCheckout({skipPreflight: true})` for in-place retry; PENDING → stay on page (3DS/async)
+10. SUCCESS/PENDING → `confirmOrder()` → server verifies → redirect to `/order-received`; FAILURE → `resetSdkState()` + `startYunoCheckout({skipPreflight: true})` for in-place retry
 
 ---
 
@@ -136,12 +146,13 @@ Yuno API (https://api[-env].y.uno)
 | File | Responsibility |
 |------|---------------|
 | `yuno-woocommerce.php` | Registers gateway via `woocommerce_payment_gateways`, order status filter (physical vs downloadable/virtual), block checkout registration, `cart_checkout_blocks` + `custom_order_tables` (HPOS) compatibility declarations |
-| `class-wc-gateway-yuno.php` | Admin settings UI, script enqueuing, `process_payment()`, `receipt_page()`, `early_redirect_paid_orders()`, split config validation, `$this->supports = ['products']` |
+| `uninstall.php` | Fires on plugin deletion, deletes `woocommerce_yuno_settings` option |
+| `class-wc-gateway-yuno.php` | Admin settings UI, script enqueuing, `process_payment()`, `receipt_page()`, `early_redirect_paid_orders()`, `validate_checkout_fields()`, split config validation, `$this->supports = ['products']` |
 | `class-wc-gateway-yuno-blocks.php` | `AbstractPaymentMethodType` — registers Yuno with WC Blocks payment method registry |
 | `rest-api.php` | REST routes, customer creation, checkout session, payment creation, confirm, webhook handling |
 | `api.js` | `getPublicApiKey`, `getCheckoutSession`, `createCustomer`, `createPayment`, `confirmOrder`, `checkOrderStatus`, `duplicateOrder` |
 | `checkout.js` | `startYunoCheckout()`, `runPreflightChecks()`, `resetSdkState()`, `yunoCreatePayment()`, `yunoPaymentResult()`, `handlePayClick()` |
-| `checkout.css` | Theme style resets for `#yuno-root`, `#yuno-apm-form`, `#yuno-action-form` |
+| `checkout.css` | Theme style resets for `#yuno-root`, `#yuno-apm-form`, `#yuno-action-form`, processing overlay styles, WC checkout page styles, order-pay page cleanup |
 | `src/blocks/yuno-blocks.js` | React component source for block checkout (compiled to `assets/js/blocks/`) |
 
 ---
@@ -154,7 +165,7 @@ Yuno API (https://api[-env].y.uno)
 | POST | `/yuno/v1/customer` | Creates Yuno customer for order |
 | POST | `/yuno/v1/checkout-session` | Creates Yuno checkout session (Full SDK / `SDK_CHECKOUT` workflow) |
 | POST | `/yuno/v1/payments` | Creates payment via Yuno API (one_time_token, split data) |
-| POST | `/yuno/v1/confirm` | Server-side payment verification + order update |
+| POST | `/yuno/v1/confirm` | Server-side payment verification + order update (PENDING treated as success) |
 | POST | `/yuno/v1/check-order-status` | Status check on page load (prevents double-pay, triggers auto-duplicate) |
 | POST | `/yuno/v1/duplicate-order` | Creates new order after failed payment |
 | POST | `/yuno/v1/webhook` | Receives Yuno events (HMAC-verified) |
@@ -164,7 +175,7 @@ Yuno API (https://api[-env].y.uno)
 ## Coding Patterns & Invariants
 
 ### Security (never break these)
-- **Server-side verification always** — never trust client-reported payment status. Always query Yuno API (`/v1/checkout/sessions/{session}/payment`) in `/confirm` before updating order status.
+- **Server-side verification always** — never trust client-reported payment status. Always query Yuno API (`/v1/checkout/sessions/{session}/payment`) in `/confirm` before updating order status. PENDING/PROCESSING/REQUIRES_ACTION statuses are treated as success (auto-capture) and call `payment_complete()`.
 - **HMAC webhook verification** — three-layer check: `x-api-key`, `x-secret`, and `x-hmac-signature` (HMAC-SHA256 in both hex and base64 formats). Implemented in `yuno_verify_webhook_signature()`. Credential mismatches log at `error` level.
 - **Order key validation** — all REST endpoints **require** `order_key` via `yuno_get_order_from_request()`. Missing `order_key` returns HTTP 400. The `check-order-status` endpoint also enforces mandatory `order_key`.
 - **Idempotency checks** — always check `$order->is_paid()` before calling `payment_complete()` in both webhook handlers and `/confirm`. Transient locks prevent race conditions.
@@ -186,17 +197,19 @@ Yuno API (https://api[-env].y.uno)
 - **State guards in checkout.js** — always check `state.starting`, `state.started`, `state.paid` before acting to prevent double-init or double-submit.
 
 ### Customer Management
-- **Per-order customer strategy** — each WC order creates a fresh Yuno customer with `merchant_customer_id = woo_order_{order_id}`. Never reuse customers across orders.
+- **Per-order customer strategy** — each WC order creates a fresh Yuno customer with `merchant_customer_id = woo_order_{order_id}` (also set as `organization_customer_external_id`). Never reuse customers across orders.
+- **CUSTOMER_ID_DUPLICATED recovery** — if customer creation returns this error, the plugin searches the Yuno API by `merchant_customer_id` and reuses the existing customer ID. Handles three response shapes (single object, array, paginated `data` array).
 - **Cached per order** — customer ID cached in `_yuno_customer_id` order meta to avoid duplicate creation within the same order lifecycle.
 - **Graceful degradation** — payment continues even if customer creation fails (`null` customer_id is allowed by the API).
 - **CUSTOMER_NOT_FOUND recovery** — if the checkout session returns `CUSTOMER_NOT_FOUND` (e.g. after API key rotation), the plugin clears stale meta, recreates the customer, and retries the session automatically.
 
 ### WordPress Conventions
 - **HPOS-compatible queries** — use `wc_get_orders(['meta_key' => ..., 'meta_value' => ...])` instead of direct `$wpdb` queries for order lookups.
-- **Settings retrieval** — use `yuno_get_env($key, $default)` which checks WP options → environment variables → PHP constants in that priority order. The WP option key is `woocommerce_yuno_settings` (auto-derived from `$this->id = 'yuno'` by `WC_Settings_API`). Uses static caching for the settings array and key map (per-request).
+- **Settings retrieval** — use `yuno_get_env($key, $default)` which checks WP options → environment variables → PHP constants in that priority order. The WP option key is `woocommerce_yuno_settings` (auto-derived from `$this->id = 'yuno'` by `WC_Settings_API`). `yuno_get_env()` uses PHP `static` caching for the settings array and key map (per-request). Note: `WC_Gateway_Yuno::get_settings_array()` and `get_setting()` do NOT use static caching — they call `get_option()` fresh each time.
 - **Variable naming** — all PHP variables use `snake_case`. No camelCase variables in PHP code.
+- **Gateway availability** — `is_available()` requires `account_id`, `public_api_key`, and `private_secret_key` to all be non-empty for the gateway to appear at checkout.
 - **No frontend form fields** — Yuno SDK owns all payment field rendering. WC fields are billing/shipping info only.
-- **Checkout field validation** — `validate_checkout_fields()` in `class-wc-gateway-yuno.php` requires at least first OR last name, email, and valid phone. Phone is formatted via `yuno_format_phone_number($phone, $country)` which returns `{ country_code, number }`. Error messages are in Spanish.
+- **Checkout field validation** — `validate_checkout_fields()` in `class-wc-gateway-yuno.php` requires at least first OR last name, email, and valid phone. Phone is formatted via `yuno_format_phone_number($phone, $country)` which returns `{ country_code, number }`. Error messages are in English, wrapped in `__()` with `yuno-payment-gateway` text domain for i18n.
 
 ### Frontend (checkout.js)
 - **`startYunoCheckout({ skipPreflight })`** — guarded by `state.starting || state.started`; parallelizes `createCustomer()` and `getPublicApiKey()` via `Promise.all`, then creates checkout session, calls `startCheckout()`, then `mountCheckout()`. The `publicApiKey` is injected server-side via `YUNO_WC`, eliminating an extra REST call when available. Accepts `{ skipPreflight: true }` to skip preflight checks on retry.
@@ -208,11 +221,13 @@ Yuno API (https://api[-env].y.uno)
 - **`startPayment()` in `handlePayClick`** — triggers SDK tokenization and payment creation; NOT called at init.
 - **`hideLoader()` cleanup** — always call `yunoInstance?.hideLoader()` in `yunoError` to prevent stuck SDK loaders.
 - **`window.YUNO_CHECKOUT_LOADED`** — guard at top of IIFE prevents double-loading if the script is enqueued twice.
+- **3DS return detection** — on page load, checks for `yuno_3ds_return` URL param (set as `callback_url` in checkout session). If present, strips it via `history.replaceState` and sets `is3dsReturn` flag to suppress auto-duplicate in preflight checks.
 - **SDK loader hiding** — injects CSS at load time to hide Yuno loader elements and prevent "One moment please" flashes.
 - **Double-init pattern** — `startYunoCheckout` is called via both `window.addEventListener("yuno-sdk-ready")` AND `setTimeout(..., 400)` to handle race conditions; the guard ensures only one runs.
 - **`renderMode`** — `{ type: 'modal' }` controls how APM forms and 3DS action flows render, NOT the card form itself. Selectors: `apmForm: "#yuno-apm-form"`, `actionForm: "#yuno-action-form"`.
 - **`card` config** — `{ type: "extends", hideCardholderName: false, cardholderName: { required: true } }` extends the default card form with a required cardholder name field.
 - **Error/failure recovery** — `yunoError` and failure branches in `yunoPaymentResult` call `resetSdkState()` + `startYunoCheckout({ skipPreflight: true })` for clean in-place retry.
+- **Backend disagreement remount** — if `yunoPaymentResult` receives a positive status but `confirmOrder()` returns `{ failed: true }`, the SDK is reset and restarted (handles cases where Yuno reports success but server-side verification disagrees).
 - **UI helpers** — `showProcessingOverlay()`, `hideProcessingOverlay()`, `setPayButtonVisible(visible)`, `setPayButtonDisabled(disabled)`, `resolvePayButtonTarget(e)`, `handleKeyPress(e)` manage button state and processing UI.
 - **Minimal console logging** — `checkout.js` uses `console.error` and `console.warn` only for actual errors/warnings. Verbose `console.log` calls have been removed for production cleanliness.
 
@@ -225,15 +240,16 @@ State object (defined at top of IIFE):
 - `state.selectedPaymentMethod` — last selected method type from `yunoPaymentMethodSelected`
 
 Payment status constants (checkout.js):
-- SUCCESS: `SUCCEEDED`, `VERIFIED`, `PAYED`
-- PENDING: `PENDING` (3DS/async flows — stay on page, SDK continues)
-- FAILURE: `REJECTED`, `DECLINED`, `CANCELED`, `CANCELLED`, `ERROR`, `EXPIRED`, `FAILED`
+- SUCCESS: `SUCCEEDED`, `VERIFIED`, `PAYED` (note: `APPROVED` is in PHP constants but not JS)
+- PENDING: `PENDING` (treated as positive — `confirmOrder()` verifies and redirects on success)
+- FAILURE: `REJECTED`, `DECLINED`, `CANCELED` (SDK spelling), `CANCELLED` (API spelling), `ERROR`, `EXPIRED`, `FAILED`
 
 SDK callbacks used: `yunoPaymentMethodSelected`, `yunoPaymentResult`, `yunoError`, `yunoCreatePayment`, `onLoading`
 
 ### Performance Patterns
 - **Static caching** — `yuno_get_env()` and `yuno_debug_enabled()` use PHP `static` variables to avoid repeated `get_option()` calls within a single request.
 - **Batched order saves** — `$order->save()` is NOT called after `update_status()` or `payment_complete()` (both internally call `save()`). In `yuno_create_duplicate_order_internal()`, meta writes are batched before a single `save()`.
+- **Duplicate order reuse** — `yuno_duplicate_order()` checks for an existing duplicate via `_yuno_duplicate_order_id` meta before creating a new one. If the existing duplicate is in `pending` or `on-hold` status, it is reused (returns `reused: true` flag).
 - **Parallelized frontend calls** — `createCustomer()` and `getPublicApiKey()` run in parallel via `Promise.all` in `checkout.js`.
 - **Server-injected public key** — `publicApiKey` is injected via `wp_localize_script` to eliminate the `/public-api-key` REST call. `getPublicApiKey()` is a fallback only, used when `YUNO_WC.publicApiKey` is not available.
 
@@ -241,11 +257,12 @@ SDK callbacks used: `yunoPaymentMethodSelected`, `yunoPaymentResult`, `yunoError
 
 `yuno_handle_webhook` dispatches to dedicated handlers by `type_event`. Supports two webhook payload formats:
 - **Format 1:** `{ "type_event": "payment.succeeded", "data": {...} }` — explicit event type
-- **Format 2:** `{ "payment": {...} }` — event type inferred from `payment.status`
+- **Format 2:** `{ "payment": {...} }` — event type inferred from `payment.status` (e.g. `PENDING` → `payment.pending`, `PAYED`/`APPROVED` → `payment.succeeded`)
 
 | Event type(s) | Handler | Behavior |
 |---|---|---|
-| `payment.succeeded`, `payment.purchase` | `yuno_webhook_handle_payment_succeeded` | Verifies with Yuno API, calls `payment_complete()`, uses transient lock |
+| `payment.succeeded`, `payment.purchase` | `yuno_webhook_handle_payment_succeeded` | Verifies with Yuno API, calls `payment_complete($checkout_session)` (session ID stored as WC transaction ID), uses transient lock |
+| `payment.pending` | _(inline)_ | Logs the event, adds order note, returns 200 without changing order status |
 | `payment.failed`, `payment.rejected`, `payment.declined` | `yuno_webhook_handle_payment_failed` | Marks order failed. Does NOT auto-duplicate — duplication is frontend-driven only (via `runPreflightChecks()` or `resetSdkState()`) |
 | `payment.chargeback` | `yuno_webhook_handle_chargeback` | Sets order to `on-hold`, adds note for manual review |
 | `payment.refunds`, `payment.refund`, `refunds` | `yuno_webhook_handle_refund` | Creates WC refund object; full refund → `refunded` status; partial → note only |
@@ -279,9 +296,17 @@ API base URL is derived from the `PUBLIC_API_KEY` prefix:
 | `dev_` | Development | `https://api-dev.y.uno` |
 | `staging_` | Staging | `https://api-staging.y.uno` |
 | `sandbox_` | Sandbox | `https://api-sandbox.y.uno` |
-| `prod_` or none | Production | `https://api.y.uno` |
+| `prod_` | Production | `https://api.y.uno` |
+| unknown/none | Fallback | `https://api-sandbox.y.uno` |
 
 Function: `yuno_api_url_from_public_key($public_api_key)` in `rest-api.php`.
+
+### Notable Helper Functions (rest-api.php)
+
+- **`yuno_build_address_from_order($order, $type, $fallback_type)`** — builds Yuno-format address array (`country`, `state`, `city`, `zip_code`, `address_line_1`, `address_line_2`). Falls back to billing fields if shipping fields are empty.
+- **`yuno_extract_payment_status($raw)`** — extracts status from Yuno API responses by checking 8 candidate locations. Returns `'UNKNOWN'` if `$raw` is not an array (protects against string API error responses).
+- **`yuno_is_localhost()`** — checks `localhost`, `127.0.0.1`, `::1`, `.local`, `.test` TLD patterns. Used to omit `callback_url` from checkout session payload on local dev.
+- **`yuno_get_wc_price_decimals()`** — uses `wc_get_price_decimals()` with fallback, clamped 0–6.
 
 ---
 
@@ -359,8 +384,8 @@ Both flows converge at the order-pay page — no duplicate payment logic.
 
 ### Key Components
 
-- **`class-wc-gateway-yuno-blocks.php`** — `AbstractPaymentMethodType` implementation. Methods: `initialize()`, `is_active()`, `get_payment_method_script_handles()`, `get_payment_method_data()`.
-- **`src/blocks/yuno-blocks.js`** — React component that calls `registerPaymentMethod()`. Registers `onPaymentSetup` returning SUCCESS with empty `paymentMethodData` (WC Blocks handles the redirect).
+- **`class-wc-gateway-yuno-blocks.php`** — `AbstractPaymentMethodType` implementation. Methods: `initialize()`, `is_active()`, `get_payment_method_script_handles()`, `get_payment_method_data()`. Returns `title`, `description`, `supports`, `icon` (credit-card.svg), and `cardIcons` array (visa, mastercard, amex, diners, discover).
+- **`src/blocks/yuno-blocks.js`** — React component (uses `createElement`, not JSX) that calls `registerPaymentMethod()`. Components: `Label` (title + icon), `CardIcons` (renders card brand icons), `Content` (description + card icons, registers `onPaymentSetup`), `Edit` (same as Content, for block editor preview). `canMakePayment: () => true`.
 - **Settings data key** — `getSetting('yuno_data')` (derived from `protected $name = 'yuno'`).
 
 ### Registration Flow

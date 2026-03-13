@@ -17,15 +17,16 @@ This plugin uses the **Yuno Web SDK** (v1.5) and a PHP REST API layer to:
 - **Multiple payment methods** via Yuno SDK (cards, wallets, local methods)
 - **Block checkout support** — works with WooCommerce block-based checkout (default since WC 8.3)
 - **Marketplace split payments** with percent-based or fixed commission
-- **Automatic retry** — failed payments auto-duplicate the order for seamless retry
+- **In-place retry** — customers can retry a failed payment without leaving the page; order duplication only occurs when revisiting a failed order's pay page
 - **HMAC webhook verification** — three-layer check (x-api-key, x-secret, HMAC-SHA256 signature)
 - **Server-side payment verification** — never trusts client-reported payment status
 - **Multi-environment support** — auto-detects from public key prefix (sandbox_, staging_, dev_, prod_)
 - **Per-order customer creation** for clean payment isolation
 - **Virtual/Downloadable products** auto-complete to `completed` status
-- **3DS/Authentication flow** handling with proper status management
+- **3DS/Authentication support** — handles 3D Secure and additional authentication challenges during payment
 - **PII redaction** — phone numbers, emails, and full API payloads are never logged
-- **Production logging** — error/warning levels always logged regardless of debug setting
+- **Debug logging** — optional WooCommerce-integrated logging for troubleshooting payments and webhooks
+- **Clean uninstall** — `uninstall.php` removes plugin settings on deletion
 
 ---
 
@@ -66,6 +67,7 @@ npm run env:clean    # Reset WordPress to clean state
 - **WordPress:** http://localhost:8888
 - **Credentials:** `admin` / `password`
 - **Plugin:** auto-installed and activated from `./yuno-woocommerce`
+- **WooCommerce:** not included in `.wp-env.json` — must be installed manually
 
 ---
 
@@ -99,6 +101,7 @@ Configure in your Yuno Dashboard:
 
 **Supported Events:**
 - `payment.succeeded` / `payment.purchase` — marks order as paid
+- `payment.pending` — logs event, adds order note (no status change)
 - `payment.failed` / `payment.rejected` / `payment.declined` — marks order as failed
 - `payment.chargeback` — marks order as on-hold for review
 - `payment.refunds` / `payment.refund` — creates WC refund (full or partial)
@@ -145,7 +148,7 @@ Both block and legacy checkout converge at the order-pay page — a single payme
 7. User selects payment method -> pay button shown
 8. User clicks Pay -> SDK tokenizes -> `yunoCreatePayment(oneTimeToken)` -> backend POST `/yuno/v1/payments` (includes split data if configured) -> `continuePayment()`
 9. `yunoPaymentResult` fires -> `confirmOrder` verifies with Yuno API
-10. SUCCESS -> redirect to thank-you page; FAILURE -> `resetSdkState()` + in-place retry; PENDING -> stay on page (3DS)
+10. SUCCESS/PENDING -> `confirmOrder` verifies -> redirect to thank-you page; FAILURE -> `resetSdkState()` + in-place retry
 
 ---
 
@@ -157,7 +160,7 @@ Both block and legacy checkout converge at the order-pay page — a single payme
 | POST | `/yuno/v1/customer` | Creates Yuno customer for order |
 | POST | `/yuno/v1/checkout-session` | Creates checkout session (Full SDK / `SDK_CHECKOUT`) |
 | POST | `/yuno/v1/payments` | Creates payment via Yuno API (one_time_token, split data) |
-| POST | `/yuno/v1/confirm` | Server-side payment verification + order update |
+| POST | `/yuno/v1/confirm` | Server-side payment verification + order update (PENDING treated as success) |
 | POST | `/yuno/v1/check-order-status` | Pre-flight status check (prevents double-pay) |
 | POST | `/yuno/v1/duplicate-order` | Creates retry order after failure |
 | POST | `/yuno/v1/webhook` | Receives HMAC-verified Yuno events |
@@ -168,7 +171,7 @@ All endpoints (except webhook) require WP REST nonce and mandatory `order_key` f
 
 ## Security
 
-- **Server-side verification** — payment status always verified against Yuno API before updating WC order
+- **Server-side verification** — payment status always verified against Yuno API before updating WC order (PENDING/PROCESSING/REQUIRES_ACTION treated as auto-capture success)
 - **HMAC webhook verification** — three-layer check: `x-api-key`, `x-secret`, HMAC-SHA256 signature (hex + base64)
 - **Mandatory order key** — all REST endpoints require `order_key`; missing key returns HTTP 400
 - **Idempotent processing** — transient locks (30s TTL) and `is_paid()` checks prevent duplicate processing
@@ -187,13 +190,17 @@ sdk-woocommerce/
 │   └── workflows/
 │       └── deploy-to-wporg.yml             # WordPress.org deployment pipeline
 ├── .wp-env.json                            # Docker/WordPress config
+├── Dockerfile                              # PHP 8.2 Apache image
 ├── package.json                            # npm scripts for wp-env
 ├── CLAUDE.md                               # Detailed dev documentation
 ├── yuno-woocommerce/
 │   ├── yuno-woocommerce.php                # Plugin entry point + constants
+│   ├── uninstall.php                       # Cleanup on plugin deletion
 │   ├── package.json                        # Build tooling (@wordpress/scripts)
 │   ├── webpack.config.js                   # Custom webpack config (WC externals)
 │   ├── readme.txt                          # WordPress.org plugin directory readme
+│   ├── LICENSE                             # GPLv2 full license text
+│   ├── .gitattributes                      # export-ignore rules for git archive ZIPs
 │   ├── includes/
 │   │   ├── class-wc-gateway-yuno.php       # WC_Payment_Gateway subclass
 │   │   ├── class-wc-gateway-yuno-blocks.php # Block checkout integration
@@ -203,13 +210,16 @@ sdk-woocommerce/
 │   │       └── yuno-blocks.js              # Block checkout React source
 │   ├── languages/
 │   │   └── yuno-payment-gateway.pot        # Translation template
+│   ├── wordpress_org_assets/               # WP.org directory marketing assets
+│   │   ├── banner-*.png                    # Plugin banners
+│   │   └── icon-*.png                      # Plugin icons
 │   └── assets/
 │       ├── js/
 │       │   ├── api.js                      # Frontend REST fetch wrappers
 │       │   ├── checkout.js                 # SDK orchestration + state machine
 │       │   └── blocks/                     # Compiled block output (committed)
 │       ├── css/
-│       │   └── checkout.css                # SDK container styles
+│       │   └── checkout.css                # SDK container + processing overlay styles
 │       └── images/                         # Card brand SVG icons
 ```
 
@@ -245,12 +255,12 @@ npm run start            # Development watch mode
 ```
 pending
   |
-  +-> (payment approved) -> processing (physical) / completed (virtual/downloadable)
+  +-> (payment approved/pending) -> processing (physical) / completed (virtual/downloadable)
+  |       Note: PENDING status is treated as auto-capture success in /confirm
   |
-  +-> (payment pending 3DS) -> pending (waits for webhook/SDK callback)
-  |                              |
-  |                              +-> (webhook: succeeded) -> processing/completed
-  |                              +-> (webhook: failed) -> failed
+  +-> (webhook: succeeded) -> processing/completed
+  +-> (webhook: pending) -> pending (note added, no status change)
+  +-> (webhook: failed) -> failed
   |
   +-> (payment rejected) -> failed -> (auto-duplicate for retry)
 ```
