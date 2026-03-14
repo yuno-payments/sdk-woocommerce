@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: yuno-woocommerce
+        working-directory: yuno-payment-gateway
     steps:
       - uses: actions/checkout@v4
 
@@ -25,5 +25,5 @@ jobs:
           SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
           SLUG: yuno-payment-gateway
-          BUILD_DIR: yuno-woocommerce
-          ASSETS_DIR: yuno-woocommerce/wordpress_org_assets
+          BUILD_DIR: yuno-payment-gateway
+          ASSETS_DIR: yuno-payment-gateway/wordpress_org_assets

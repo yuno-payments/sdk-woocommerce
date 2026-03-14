@@ -11,7 +11,7 @@ WordPress plugin that integrates **Yuno Payments** as a WooCommerce payment gate
 - **License:** GPLv2 or later
 - **PHP:** 7.4+ | **WordPress:** 6.0+ | **WooCommerce:** 8.0+
 
-### Global Constants (defined in `yuno-woocommerce.php`)
+### Global Constants (defined in `yuno-payment-gateway.php`)
 
 | Constant | Value | Usage |
 |----------|-------|-------|
@@ -42,7 +42,7 @@ npm run env:clean    # Reset WordPress to clean state
 
 - **WordPress URL:** http://localhost:8888
 - **Default credentials:** `admin` / `password`
-- **Plugin:** `./yuno-woocommerce` is auto-installed and activated
+- **Plugin:** `./yuno-payment-gateway` is auto-installed and activated
 - **WooCommerce:** not included in `.wp-env.json` — must be installed manually in the dev environment
 - **WP_DEBUG:** enabled, logs to `wp-content/debug.log`
 
@@ -58,8 +58,8 @@ sdk-woocommerce/
 ├── .wp-env.json                          # wp-env Docker/WordPress config
 ├── Dockerfile                            # PHP 8.2 Apache image (soap, mysqli, pdo)
 ├── package.json                          # npm scripts for wp-env
-├── yuno-woocommerce/
-│   ├── yuno-woocommerce.php              # Plugin bootstrap (entry point)
+├── yuno-payment-gateway/
+│   ├── yuno-payment-gateway.php              # Plugin bootstrap (entry point)
 │   ├── uninstall.php                     # Cleanup on plugin deletion (deletes settings)
 │   ├── package.json                      # Build tooling (@wordpress/scripts)
 │   ├── webpack.config.js                 # Custom webpack config (WC externals)
@@ -145,7 +145,7 @@ Yuno API (https://api[-env].y.uno)
 
 | File | Responsibility |
 |------|---------------|
-| `yuno-woocommerce.php` | Registers gateway via `woocommerce_payment_gateways`, order status filter (physical vs downloadable/virtual), block checkout registration, `cart_checkout_blocks` + `custom_order_tables` (HPOS) compatibility declarations |
+| `yuno-payment-gateway.php` | Registers gateway via `woocommerce_payment_gateways`, order status filter (physical vs downloadable/virtual), block checkout registration, `cart_checkout_blocks` + `custom_order_tables` (HPOS) compatibility declarations |
 | `uninstall.php` | Fires on plugin deletion, deletes `woocommerce_yuno_settings` option |
 | `class-wc-gateway-yuno.php` | Admin settings UI, script enqueuing, `process_payment()`, `receipt_page()`, `early_redirect_paid_orders()`, `validate_checkout_fields()`, split config validation, `$this->supports = ['products']` |
 | `class-wc-gateway-yuno-blocks.php` | `AbstractPaymentMethodType` — registers Yuno with WC Blocks payment method registry |
@@ -399,7 +399,7 @@ Both flows converge at the order-pay page — no duplicate payment logic.
 Block checkout requires a build step to compile the React source:
 
 ```bash
-cd yuno-woocommerce
+cd yuno-payment-gateway
 npm install              # First time only
 npm run build            # Production build (minified)
 npm run start            # Development watch mode
@@ -423,4 +423,4 @@ npm run start            # Development watch mode
 
 - **Yuno Web SDK:** `https://sdk-web.y.uno/v1.5/main.js` (loaded via `wp_enqueue_script`)
 - **@wordpress/env:** v10.37.0 (dev dependency, used only for local Docker environment)
-- **@wordpress/scripts:** ^28.0.0 (dev dependency in `yuno-woocommerce/`, used to compile block checkout React code)
+- **@wordpress/scripts:** ^28.0.0 (dev dependency in `yuno-payment-gateway/`, used to compile block checkout React code)

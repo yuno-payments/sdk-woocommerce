@@ -45,7 +45,7 @@ This plugin uses the **Yuno Web SDK** (v1.5) and a PHP REST API layer to:
 
 ### Manual Installation
 
-1. Upload the `yuno-woocommerce` folder to `wp-content/plugins/`
+1. Upload the `yuno-payment-gateway` folder to `wp-content/plugins/`
 2. Activate the plugin in WordPress Admin
 3. Ensure WooCommerce is active
 4. Go to **WooCommerce > Settings > Payments > Yuno**
@@ -66,7 +66,7 @@ npm run env:clean    # Reset WordPress to clean state
 
 - **WordPress:** http://localhost:8888
 - **Credentials:** `admin` / `password`
-- **Plugin:** auto-installed and activated from `./yuno-woocommerce`
+- **Plugin:** auto-installed and activated from `./yuno-payment-gateway`
 - **WooCommerce:** not included in `.wp-env.json` — must be installed manually
 
 ---
@@ -193,8 +193,8 @@ sdk-woocommerce/
 ├── Dockerfile                              # PHP 8.2 Apache image
 ├── package.json                            # npm scripts for wp-env
 ├── CLAUDE.md                               # Detailed dev documentation
-├── yuno-woocommerce/
-│   ├── yuno-woocommerce.php                # Plugin entry point + constants
+├── yuno-payment-gateway/
+│   ├── yuno-payment-gateway.php              # Plugin entry point + constants
 │   ├── uninstall.php                       # Cleanup on plugin deletion
 │   ├── package.json                        # Build tooling (@wordpress/scripts)
 │   ├── webpack.config.js                   # Custom webpack config (WC externals)
@@ -236,7 +236,7 @@ Both checkout types use the same redirect-to-order-pay approach — `process_pay
 Compiled assets are committed to the repo — **no build step needed for production**. Only rebuild if you modify `src/blocks/yuno-blocks.js`:
 
 ```bash
-cd yuno-woocommerce
+cd yuno-payment-gateway
 npm install              # First time only
 npm run build            # Production build
 npm run start            # Development watch mode

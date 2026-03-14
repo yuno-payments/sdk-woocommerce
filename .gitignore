@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-yuno-woocommerce/node_modules/
+yuno-payment-gateway/node_modules/
 
 # WordPress generated files
 wp-content/

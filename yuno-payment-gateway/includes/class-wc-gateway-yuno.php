@@ -440,9 +440,10 @@ class WC_Gateway_Yuno extends WC_Payment_Gateway {
     echo '<h3 class="yuno-payment-title">' . esc_html__('Pay with Yuno', 'yuno-payment-gateway') . '</h3>';
     echo '<p class="yuno-payment-subtitle">' .
          sprintf(
-           esc_html__('Order #%s - Total: %s', 'yuno-payment-gateway'),
+           /* translators: %1$s: order number, %2$s: order total */
+           esc_html__('Order #%1$s - Total: %2$s', 'yuno-payment-gateway'),
            esc_html($order_number),
-           esc_html(strip_tags($total_html))
+           esc_html(wp_strip_all_tags($total_html))
          ) .
          '</p>';
     echo '</div>';

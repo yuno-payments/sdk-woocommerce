@@ -15,23 +15,23 @@ msgstr ""
 "X-Domain: yuno-payment-gateway\n"
 
 #. Plugin Name of the plugin
-#: yuno-woocommerce.php
+#: yuno-payment-gateway.php
 msgid "Yuno Payment Gateway"
 msgstr ""
 
 #. Plugin URI of the plugin
 #. Author URI of the plugin
-#: yuno-woocommerce.php
+#: yuno-payment-gateway.php
 msgid "https://www.y.uno/"
 msgstr ""
 
 #. Description of the plugin
-#: yuno-woocommerce.php
+#: yuno-payment-gateway.php
 msgid "Accept payments through Yuno's payment orchestration platform."
 msgstr ""
 
 #. Author of the plugin
-#: yuno-woocommerce.php
+#: yuno-payment-gateway.php
 msgid "Yuno"
 msgstr ""
 
@@ -75,7 +75,7 @@ msgstr ""
 
 #: includes/class-wc-gateway-yuno.php:443
 #, php-format
-msgid "Order #%s - Total: %s"
+msgid "Order #%1$s - Total: %2$s"
 msgstr ""
 
 #: includes/class-wc-gateway-yuno.php:450
