@@ -301,8 +301,7 @@
         elementSelector: "#yuno-root",
         countryCode: countryCode,
         language: yunoConfig.language || "es", // Use WordPress language, fallback to Spanish
-        showLoading: true,
-        issuersFormEnable: true,
+        showLoading: false,
         showPaymentStatus: true,
         onLoading: ({ isLoading, type }) => {
           if (isLoading || (type === 'ONE_TIME_TOKEN' || type === 'CREATE_PAYMENT')) {
@@ -334,7 +333,7 @@
             console.error("[Yuno] Payment creation failed:", e);
             setPayButtonDisabled(false);
           } finally {
-            await yunoInstance.continuePayment({ showPaymentStatus: true });
+            yunoInstance.continuePayment();
             hideProcessingOverlay();
           }
         },
