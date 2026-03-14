@@ -144,12 +144,13 @@ async function createPayment({ oneTimeToken, checkoutSession, orderId, orderKey 
     }),
   });
 
+  const json = await safeJson(res);
+
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Payment creation failed: ${res.status}`);
+    throw new Error(`Payment creation failed: ${res.status} ${JSON.stringify(json)}`);
   }
 
-  return safeJson(res);
+  return json;
 }
 
 async function duplicateOrder({ orderId, orderKey }) {

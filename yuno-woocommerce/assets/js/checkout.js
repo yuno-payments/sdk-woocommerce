@@ -65,6 +65,7 @@
   const PAYMENT_STATUS = {
     SUCCEEDED: 'SUCCEEDED',
     VERIFIED:  'VERIFIED',
+    APPROVED:  'APPROVED',
     PAYED:     'PAYED',
     PENDING:   'PENDING',
     REJECTED:  'REJECTED',
@@ -76,7 +77,7 @@
     FAILED:    'FAILED',     // Explicit failure status returned by backend
   };
 
-  const SUCCESS_STATUSES  = [PAYMENT_STATUS.SUCCEEDED, PAYMENT_STATUS.VERIFIED, PAYMENT_STATUS.PAYED];
+  const SUCCESS_STATUSES  = [PAYMENT_STATUS.SUCCEEDED, PAYMENT_STATUS.VERIFIED, PAYMENT_STATUS.APPROVED, PAYMENT_STATUS.PAYED];
   const PENDING_STATUSES  = [PAYMENT_STATUS.PENDING];
   const FAILURE_STATUSES  = [
     PAYMENT_STATUS.REJECTED, PAYMENT_STATUS.DECLINED,
@@ -262,6 +263,7 @@
       const isSdkAvailable = await waitForYunoSdk();
       if (!isSdkAvailable) {
         console.error("[YUNO] SDK not available (Yuno.initialize missing). Check yuno-sdk script.");
+        hideProcessingOverlay();
         return;
       }
 
@@ -273,6 +275,7 @@
 
       if (!publicApiKey) {
         console.error("[YUNO] publicApiKey empty. Check /public-api-key");
+        hideProcessingOverlay();
         return;
       }
 
@@ -287,6 +290,7 @@
 
       if (!checkoutSession) {
         console.error("[YUNO] Failed to create checkout session");
+        hideProcessingOverlay();
         return;
       }
 
@@ -318,7 +322,6 @@
          * Must call continuePayment() when done (in finally block).
          */
         yunoCreatePayment: async (oneTimeToken) => {
-          console.log('[YUNO] Creating payment with token:', oneTimeToken);
           if (state.paid) return;
           setPayButtonDisabled(true);
           showProcessingOverlay();
@@ -357,7 +360,6 @@
          * Called when user selects a payment method
          */
         yunoPaymentMethodSelected: (data) => {
-          console.log('YUNO Payment Method Selected:', data);
           state.selectedPaymentMethod = data?.type;
 
           // Show Pay button now that a method is selected
@@ -370,7 +372,6 @@
          * We confirm the Woo order by verifying with our backend.
          */
         yunoPaymentResult: async (result) => {
-          console.log('YUNO Payment Result:', result);
           // Show processing overlay for all statuses
           showProcessingOverlay();
 
@@ -444,9 +445,9 @@
             timestamp: new Date().toISOString()
           });
 
+          yunoInstance?.hideLoader();
           resetSdkState();
           startYunoCheckout({ skipPreflight: true });
-          yunoInstance?.hideLoader();
 
         },
       });
@@ -459,6 +460,7 @@
       hideProcessingOverlay();
     } catch (e) {
       console.error("[YUNO] startYunoCheckout error", e);
+      hideProcessingOverlay();
     } finally {
       state.starting = false;
     }
