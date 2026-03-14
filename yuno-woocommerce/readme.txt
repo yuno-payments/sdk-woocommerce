@@ -1,6 +1,6 @@
 === Yuno Payment Gateway ===
-Contributors: yunopayments
-Tags: payments, checkout, payment gateway, credit card, payment orchestration
+Contributors: yunocheckout
+Tags: payments, checkout, payment gateway, credit card, woocommerce
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
@@ -42,7 +42,7 @@ page to render the secure payment form. This SDK is loaded from Yuno's servers f
 compliance and security purposes — the SDK must be served from Yuno's infrastructure to
 maintain PCI DSS compliance and ensure secure payment data handling.
 
-* [Yuno Terms of Service](https://www.y.uno/terms)
+* [Yuno Terms of Service](https://y.uno/terms-and-conditions)
 * [Yuno Privacy Policy](https://www.y.uno/privacy)
 
 == Installation ==
