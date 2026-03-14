@@ -1,7 +1,6 @@
 <?php
 /**
  * Plugin Name:       Yuno Payment Gateway
- * Plugin URI:        https://www.y.uno/
  * Description:       Accept payments through Yuno's payment orchestration platform.
  * Version:           1.0.0
  * Requires at least: 6.0

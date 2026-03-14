@@ -19,7 +19,6 @@ msgstr ""
 msgid "Yuno Payment Gateway"
 msgstr ""
 
-#. Plugin URI of the plugin
 #. Author URI of the plugin
 #: yuno-payment-gateway.php
 msgid "https://www.y.uno/"
