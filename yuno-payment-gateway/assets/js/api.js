@@ -146,7 +146,7 @@ async function createPayment({ oneTimeToken, checkoutSession, orderId, orderKey 
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Payment creation failed: ${res.status}`);
+    throw new Error(`Payment creation failed: ${res.status} ${text}`);
   }
 
   return safeJson(res);
