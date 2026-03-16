@@ -365,8 +365,8 @@ body.woocommerce-checkout .wc_payment_method label {
   color: inherit !important;
 }
 
-/* Add card icon before Yuno Card label */
-body.woocommerce-checkout .wc_payment_method.payment_method_yuno_card label::before {
+/* Add card icon before Yuno label */
+body.woocommerce-checkout .wc_payment_method.payment_method_yuno label::before {
   content: "💳" !important;
   font-size: 18px !important;
   display: inline-block !important;
@@ -411,4 +411,106 @@ body.woocommerce-checkout #place_order {
 body.woocommerce-checkout .woocommerce-privacy-policy-text,
 body.woocommerce-order-pay .woocommerce-privacy-policy-text {
   display: none !important;
+}
+
+/* ===== PROCESSING OVERLAY ===== */
+/* Non-destructive overlay shown during payment processing (tokenization + payment creation) */
+
+.yuno-processing-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.92);
+  z-index: 2001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.yuno-processing-content {
+  text-align: center;
+  max-width: 480px;
+  width: 90%;
+  padding: 0 16px;
+}
+
+.yuno-processing-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #282A30;
+  line-height: 36px;
+  margin: 0 0 8px 0;
+}
+
+.yuno-processing-subtitle {
+  font-size: 16px;
+  font-weight: 400;
+  color: #6C6F75;
+  line-height: 24px;
+  margin: 0 0 32px 0;
+}
+
+.yuno-processing-bar-track {
+  width: 100%;
+  height: 4px;
+  background: #E5E7EB;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.yuno-processing-bar-fill {
+  width: 40%;
+  height: 100%;
+  background: #282A30;
+  border-radius: 2px;
+  animation: yuno-bar-slide 1.5s linear infinite;
+}
+
+@keyframes yuno-bar-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* ── Responsive: mobile < 576px ── */
+@media (max-width: 575px) {
+  .yuno-processing-content {
+    max-width: 320px;
+  }
+
+  .yuno-processing-title {
+    font-size: 22px;
+    line-height: 30px;
+  }
+
+  .yuno-processing-subtitle {
+    font-size: 14px;
+    line-height: 20px;
+    margin-bottom: 24px;
+  }
+}
+
+/* ── Dark mode ── */
+@media (prefers-color-scheme: dark) {
+  .yuno-processing-overlay {
+    background: rgba(30, 30, 30, 0.95);
+  }
+
+  .yuno-processing-title {
+    color: #F3F4F6;
+  }
+
+  .yuno-processing-subtitle {
+    color: #9CA3AF;
+  }
+
+  .yuno-processing-bar-track {
+    background: #374151;
+  }
+
+  .yuno-processing-bar-fill {
+    background: #D1D5DB;
+  }
 }

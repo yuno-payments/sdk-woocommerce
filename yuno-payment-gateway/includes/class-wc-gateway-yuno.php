@@ -1,10 +1,10 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
+class WC_Gateway_Yuno extends WC_Payment_Gateway {
 
   public function __construct() {
-    $this->id                 = 'yuno_card';
+    $this->id                 = YUNO_GATEWAY_ID;
     $this->method_title       = 'Yuno';
     $this->method_description = 'Accept payments with Yuno - cards, wallets, and local payment methods';
 
@@ -16,6 +16,9 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
     $title = $this->get_option('title', 'Yuno');
     $this->title = (is_string($title) && $title !== '') ? $title : 'Yuno';
+
+    $description = $this->get_option('description', 'Select your preferred payment method on the next step');
+    $this->description = (is_string($description) && $description !== '') ? $description : '';
 
     $enabled = $this->get_option('enabled', 'no');
     $this->enabled = ($enabled === 'yes') ? 'yes' : 'no';
@@ -32,8 +35,8 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
   }
 
   public function get_title() {
-    $t = isset($this->title) ? (string) $this->title : '';
-    return $t !== '' ? $t : 'Yuno';
+    $title_value = isset($this->title) ? (string) $this->title : '';
+    return $title_value !== '' ? $title_value : 'Yuno';
   }
 
   /**
@@ -81,7 +84,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
   /**
    * Validate checkout fields before order creation
-   * Only runs when Yuno Card is the selected payment method
+   * Only runs when Yuno is the selected payment method
    *
    * @param array $data Posted checkout data
    * @param WP_Error $errors Error object to add validation errors
@@ -104,7 +107,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
     // Validate name (first name OR last name required for customer name)
     if (empty($billing_first_name) && empty($billing_last_name)) {
-      $errors->add('validation', 'Por favor ingresa tu nombre para procesar el pago con Yuno.');
+      $errors->add('validation', esc_html__('Please enter your name to process the payment with Yuno.', 'yuno-payment-gateway'));
       yuno_log('warning', 'Checkout validation: missing name', [
         'billing_first_name' => $billing_first_name,
         'billing_last_name'  => $billing_last_name,
@@ -113,7 +116,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
 
     // Validate email (required for Yuno Customer)
     if (empty($billing_email)) {
-      $errors->add('validation', 'Por favor ingresa tu email para procesar el pago con Yuno.');
+      $errors->add('validation', esc_html__('Please enter your email to process the payment with Yuno.', 'yuno-payment-gateway'));
       yuno_log('warning', 'Checkout validation: missing email');
     }
 
@@ -125,18 +128,18 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       if (empty($formatted_phone)) {
         // Phone couldn't be formatted (either country not supported or invalid format)
         $errors->add('validation', sprintf(
-          'El número de teléfono no es válido para el país seleccionado (%s). Por favor verifica el número o selecciona un país diferente.',
+          /* translators: %s: billing country code */
+          esc_html__('The phone number is not valid for the selected country (%s). Please verify the number or select a different country.', 'yuno-payment-gateway'),
           $billing_country
         ));
         yuno_log('warning', 'Checkout validation: invalid phone', [
-          'billing_phone'   => $billing_phone,
+          'phone_last4'     => substr(preg_replace('/[^\d]/', '', $billing_phone), -4),
           'billing_country' => $billing_country,
         ]);
       } else {
         yuno_log('info', 'Checkout validation: phone validated', [
-          'billing_phone'   => $billing_phone,
+          'phone_last4'     => substr(preg_replace('/[^\d]/', '', $billing_phone), -4),
           'billing_country' => $billing_country,
-          'formatted_phone' => $formatted_phone,
         ]);
       }
     }
@@ -164,7 +167,14 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
         'title'       => 'Checkout Title',
         'type'        => 'text',
         'description' => 'Name the user will see at checkout.',
-        'default'     => 'Yuno Card',
+        'default'     => 'Yuno',
+        'desc_tip'    => true,
+      ],
+      'description' => [
+        'title'       => 'Checkout Description',
+        'type'        => 'textarea',
+        'description' => 'Description shown below the payment method name at checkout.',
+        'default'     => 'Select your preferred payment method on the next step',
         'desc_tip'    => true,
       ],
       'account_id' => [
@@ -313,13 +323,13 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
    * Settings helpers for rest-api.php
    */
   public static function get_settings_array() {
-    $opt = get_option('woocommerce_yuno_card_settings', []);
+    $opt = get_option('woocommerce_' . YUNO_GATEWAY_ID . '_settings', []);
     return is_array($opt) ? $opt : [];
   }
 
   public static function get_setting($key, $default = '') {
-    $s = self::get_settings_array();
-    if (isset($s[$key]) && $s[$key] !== '') return $s[$key];
+    $settings = self::get_settings_array();
+    if (isset($settings[$key]) && $settings[$key] !== '') return $settings[$key];
 
     return $default;
   }
@@ -328,10 +338,10 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     if ('yes' !== $this->enabled) return false;
 
     $account = (string) $this->get_option('account_id', '');
-    $pub     = (string) $this->get_option('public_api_key', '');
-    $priv    = (string) $this->get_option('private_secret_key', '');
+    $public_api_key     = (string) $this->get_option('public_api_key', '');
+    $private_secret_key = (string) $this->get_option('private_secret_key', '');
 
-    if ($account === '' || $pub === '' || $priv === '') return false;
+    if ($account === '' || $public_api_key === '' || $private_secret_key === '') return false;
 
     return true;
   }
@@ -352,8 +362,6 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       $order->add_order_note('Awaiting Yuno payment');
     }
 
-    wc_reduce_stock_levels($order_id);
-
     return [
       'result'   => 'success',
       'redirect' => $order->get_checkout_payment_url(true),
@@ -364,7 +372,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $order = wc_get_order($order_id);
 
     if (!$order) {
-      echo '<p>' . esc_html__('Order not found.', 'yuno') . '</p>';
+      echo '<p>' . esc_html__('Order not found.', 'yuno-payment-gateway') . '</p>';
       return;
     }
 
@@ -404,50 +412,60 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $payment_method_title = $this->get_title();
 
     echo '<div class="yuno-receipt">';
-    echo '<h2 class="yuno-page-title">' . esc_html__('Yuno-SDK plugin', 'yuno') . '</h2>';
     echo '<div class="yuno-order-summary">';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Order:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Order:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value" id="yuno-order-number">#' . esc_html($order_number) . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Date:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Date:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value">' . esc_html($order_date) . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Total:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Total:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value yuno-order-total" id="yuno-order-total">' . $total_html . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';
-    echo '<span class="yuno-order-label">' . esc_html__('Payment Method:', 'yuno') . '</span>';
+    echo '<span class="yuno-order-label">' . esc_html__('Payment Method:', 'yuno-payment-gateway') . '</span>';
     echo '<span class="yuno-order-value">' . esc_html($payment_method_title) . '</span>';
     echo '</div>';
 
     echo '</div>';
 
     echo '<div class="yuno-payment-info">';
-    echo '<h3 class="yuno-payment-title">' . esc_html__('Pay with Yuno', 'yuno') . '</h3>';
+    echo '<h3 class="yuno-payment-title">' . esc_html__('Pay with Yuno', 'yuno-payment-gateway') . '</h3>';
     echo '<p class="yuno-payment-subtitle">' .
          sprintf(
-           esc_html__('Order #%s - Total: %s', 'yuno'),
+           /* translators: %1$s: order number, %2$s: order total */
+           esc_html__('Order #%1$s - Total: %2$s', 'yuno-payment-gateway'),
            esc_html($order_number),
-           strip_tags($total_html)
+           esc_html(wp_strip_all_tags($total_html))
          ) .
          '</p>';
     echo '</div>';
 
-    echo '<div id="yuno-loader" class="yuno-loader" style="display:none;">' . esc_html__('Loading payment…', 'yuno') . '</div>';
+    echo '<div id="yuno-loader" class="yuno-loader" style="display:none;">' . esc_html__('Loading payment…', 'yuno-payment-gateway') . '</div>';
     echo '<div id="yuno-root"></div>';
     echo '<div id="yuno-apm-form"></div>';
     echo '<div id="yuno-action-form"></div>';
 
     echo '<button type="button" id="yuno-button-pay" class="yuno-pay-button" style="display:none;">' .
-         esc_html__('Pay', 'yuno') .
+         esc_html__('Pay', 'yuno-payment-gateway') .
          '</button>';
+
+    // Server-rendered processing overlay — visible from first paint (CSS loads in <head>).
+    // checkout.js showProcessingOverlay() skips creation if this element already exists.
+    echo '<div id="yuno-processing-overlay" class="yuno-processing-overlay">';
+    echo '<div class="yuno-processing-content">';
+    echo '<p class="yuno-processing-title">' . esc_html__('One moment, please...', 'yuno-payment-gateway') . '</p>';
+    echo '<p class="yuno-processing-subtitle">' . esc_html__('We are processing your payment', 'yuno-payment-gateway') . '</p>';
+    echo '<div class="yuno-processing-bar-track"><div class="yuno-processing-bar-fill"></div></div>';
+    echo '</div>';
+    echo '</div>';
 
     echo '</div>'; // .yuno-receipt
   }
@@ -508,7 +526,7 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
       true
     );
 
-    $country = (string) ($order->get_billing_country() ?: 'CO');
+    $country = (string) ($order->get_billing_country() ?: YUNO_DEFAULT_COUNTRY);
     $email   = (string) ($order->get_billing_email() ?: '');
 
     // Get WordPress locale and convert to ISO 639-1 format (es, en, pt)
@@ -516,10 +534,10 @@ class WC_Gateway_Yuno_Card extends WC_Payment_Gateway {
     $language = substr($wp_locale, 0, 2); // Extract first 2 chars: es, en, pt
 
     wp_localize_script('yuno-checkout', 'YUNO_WC', [
-      'restBase' => esc_url_raw(rest_url('yuno/v1')),
-      'nonce'    => wp_create_nonce('wp_rest'),
+      'restBase'     => esc_url_raw(rest_url('yuno/v1')),
+      'nonce'        => wp_create_nonce('wp_rest'),
+      'publicApiKey' => (string) self::get_setting('public_api_key', ''),
 
-      'payForOrder' => true,
       'orderId'   => (int) $order->get_id(),
       'orderKey'  => (string) $order->get_order_key(),
       'currency'  => (string) $order->get_currency(),

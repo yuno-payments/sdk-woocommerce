@@ -2,402 +2,349 @@
 
 Custom integration of **Yuno Payments** as a payment gateway in **WooCommerce**, developed as a WordPress plugin.
 
-This plugin uses the **Yuno Web SDK** and an intermediate layer in WordPress (REST API) to:
-- Create checkout sessions
-- Create and manage customers
-- Tokenize payment methods
-- Process payments with Yuno
-- Handle webhooks for payment status updates
-- Integrate seamlessly with WooCommerce checkout flow
+This plugin uses the **Yuno Web SDK** (v1.5) and a PHP REST API layer to:
+- Create checkout sessions (Full SDK / SDK_CHECKOUT workflow)
+- Create and manage per-order customers
+- Process payments via the Yuno SDK
+- Handle HMAC-verified webhooks for payment status updates
+- Support marketplace split payments
+- Integrate with both legacy and block-based WooCommerce checkout
 
 ---
 
-## ✨ Features
+## Features
 
-- 💳 **Multiple payment methods** via Yuno SDK (cards, wallets, local methods)
-- 🔐 **Secure configuration** via WordPress Admin UI
-- ⚙️ **Full REST API integration** with WordPress
-- 🔔 **Webhook support** for real-time payment updates
-- 🧠 **Smart SDK initialization** prevents double loading
-- ♻️ **Compatible with WooCommerce re-render** (`updated_checkout`)
-- 🧪 **Multi-environment support** (Sandbox, Staging, Dev, Production)
-- 👤 **Per-order customer creation** for clean payment isolation
-- 📦 **Virtual/Downloadable products** auto-complete to `completed` status
-- 🔄 **3DS/Authentication flow** handling with proper status management
-- 🐛 **Comprehensive debug logging** option
-- 🔒 **HMAC webhook verification** for security
-
----
-
-## 🧱 Architecture
-
-```
-WooCommerce Checkout
-        │
-        ▼
-assets/js/checkout.js
-        │
-        ▼
-  assets/js/api.js
-        │
-        ▼
-WordPress REST API (rest-api.php)
-        │
-        ├──────────────────┐
-        ▼                  ▼
-  Yuno API          Yuno Webhooks
-  (payments)        (status updates)
-```
+- **Multiple payment methods** via Yuno SDK (cards, wallets, local methods)
+- **Block checkout support** — works with WooCommerce block-based checkout (default since WC 8.3)
+- **Marketplace split payments** with percent-based or fixed commission
+- **In-place retry** — customers can retry a failed payment without leaving the page; order duplication only occurs when revisiting a failed order's pay page
+- **HMAC webhook verification** — three-layer check (x-api-key, x-secret, HMAC-SHA256 signature)
+- **Server-side payment verification** — never trusts client-reported payment status
+- **Multi-environment support** — auto-detects from public key prefix (sandbox_, staging_, dev_, prod_)
+- **Per-order customer creation** for clean payment isolation
+- **Virtual/Downloadable products** auto-complete to `completed` status
+- **3DS/Authentication support** — handles 3D Secure and additional authentication challenges during payment
+- **PII redaction** — phone numbers, emails, and full API payloads are never logged
+- **Debug logging** — optional WooCommerce-integrated logging for troubleshooting payments and webhooks
+- **Clean uninstall** — `uninstall.php` removes plugin settings on deletion
 
 ---
 
-## 📁 Plugin Structure
-
-```
-yuno-woocommerce/
-│
-├── assets/
-│   ├── css/
-│   │   └── checkout.css         # Checkout page styles
-│   └── js/
-│       ├── api.js              # REST calls to WordPress
-│       └── checkout.js         # Yuno SDK initialization & UI
-│
-├── includes/
-│   ├── class-wc-gateway-yuno-card.php  # WooCommerce Gateway class
-│   └── rest-api.php            # REST endpoints & webhook handling
-│
-└── yuno-woocommerce.php          # Plugin bootstrap
-```
-
----
-
-## 🚀 Installation
-
-### Manual Installation
-
-1. Clone or upload the plugin to:
-   ```bash
-   wp-content/plugins/yuno-woocommerce
-   ```
-
-2. Activate the plugin from WordPress Admin
-
-3. Ensure WooCommerce is active
-
-4. Go to:
-   ```
-   WooCommerce → Settings → Payments → Yuno
-   ```
-
-5. Configure your Yuno credentials and enable the payment method
-
-### Development with wp-env
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Start the environment:
-   ```bash
-   npx wp-env start
-   ```
-
-3. Access WordPress at `http://localhost:8888`
-
-4. Configure the plugin via WordPress Admin UI
-
----
-
-## ⚙️ Configuration
-
-All settings are configured through the **WordPress Admin UI**:
-
-```
-WooCommerce → Settings → Payments → Yuno
-```
-
-### Available Settings
-
-| Setting | Description |
-|---------|-------------|
-| **Enable** | Enable/disable the payment method |
-| **Checkout Title** | Name displayed to users at checkout (default: "Yuno") |
-| **Environment** | Select Yuno environment (Sandbox, Production, Staging, Dev) |
-| **ACCOUNT_ID** | Your Yuno account ID |
-| **PUBLIC_API_KEY** | Public API key (used in frontend to initialize the SDK) |
-| **PRIVATE_SECRET_KEY** | Private secret key (backend only, never exposed to frontend) |
-| **WEBHOOK_API_KEY** | API key for webhook authentication (x-api-key header) |
-| **WEBHOOK_X_SECRET** | Secret for webhook authentication (x-secret header) |
-| **WEBHOOK_HMAC_SECRET** | HMAC secret for webhook signature verification |
-| **Debug** | Enable debug logs using WooCommerce logger |
-
-### Webhook Configuration
-
-Configure the webhook in your Yuno Dashboard:
-
-**Webhook URL:**
-```
-https://your-site.com/wp-json/yuno/v1/webhook
-```
-
-**Required Headers:**
-- `x-api-key`: (from plugin settings)
-- `x-secret`: (from plugin settings)
-- `x-hmac-signature`: (auto-generated by Yuno using HMAC secret)
-
-**Supported Events:**
-- `payment.succeeded` / `payment.purchase` → Marks order as paid
-- `payment.failed` / `payment.rejected` / `payment.declined` → Marks order as failed
-- `payment.chargeback` → Marks order as on-hold for review
-- `payment.refunds` → Marks order as refunded
-
-### Alternative Configuration (Optional)
-
-For development or advanced setups, credentials can also be set via:
-
-**Option A – `wp-config.php`**
-
-```php
-define('ACCOUNT_ID', 'your_account_id');
-define('PUBLIC_API_KEY', 'sandbox_xxx');
-define('PRIVATE_SECRET_KEY', 'xxx');
-define('WEBHOOK_API_KEY', 'xxx');
-define('WEBHOOK_X_SECRET', 'xxx');
-define('WEBHOOK_HMAC_SECRET', 'xxx');
-```
-
-**Option B – Environment variables (Docker / wp-env)**
-
-```bash
-ACCOUNT_ID=xxx
-PUBLIC_API_KEY=sandbox_xxx
-PRIVATE_SECRET_KEY=xxx
-WEBHOOK_API_KEY=xxx
-WEBHOOK_X_SECRET=xxx
-WEBHOOK_HMAC_SECRET=xxx
-```
-
-> **Note:** Settings in the WordPress Admin UI take priority over environment variables.
-
----
-
-## 🧪 Sandbox Mode (Testing)
-
-Select the environment in the plugin settings. Yuno also detects the environment based on the Public API Key prefix:
-
-| Prefix     | Environment |
-|------------|-------------|
-| `sandbox_` | Sandbox     |
-| `staging_` | Staging     |
-| `dev_`     | Development |
-| `prod_`    | Production  |
-
----
-
-## 🧾 Payment Flow (Complete)
-
-### 1. Checkout Flow
-
-1. User completes WooCommerce checkout → Order created in `pending` status
-2. User redirected to `/order-pay/{ID}/?pay_for_order=true&key=...`
-3. Yuno SDK initializes on order-pay page
-4. **Customer created** in Yuno (per-order strategy: `woo_order_{ID}`)
-5. **Checkout session** created from existing WooCommerce order
-6. User enters payment details in Yuno SDK
-7. Yuno generates `oneTimeToken`
-8. Frontend calls `/yuno/v1/payments` → WordPress creates payment via Yuno API
-9. **Payment status handling:**
-   - **APPROVED/SUCCEEDED** → Order marked as paid (processing/completed)
-   - **PENDING** (3DS/authentication) → SDK handles flow, waits for webhook
-   - **REJECTED/DECLINED/CANCELLED** → Order marked as failed
-10. Frontend calls `/yuno/v1/confirm` → Verifies payment status with Yuno API
-11. User redirected to `/order-received` (thank you page)
-
-### 2. Webhook Flow (Async Status Updates)
-
-1. Yuno sends webhook to `/yuno/v1/webhook`
-2. Plugin **verifies HMAC signature** and headers
-3. Plugin **verifies payment status** with Yuno API (double verification)
-4. Order status updated based on event type:
-   - `payment.succeeded` → `processing` or `completed`
-   - `payment.failed` → `failed`
-   - `payment.chargeback` → `on-hold`
-   - `payment.refunds` → `refunded`
-5. Order notes added with payment details
-
-### 3. Customer Creation Strategy
-
-- **Per-order customers:** Each order creates a fresh customer in Yuno
-- **merchant_customer_id format:** `woo_order_{order_id}`
-- **Cached per order:** Customer ID stored in order meta (`_yuno_customer_id`)
-- **Reused within same order:** Multiple API calls for the same order reuse the customer
-- **Benefits:** Clean payment isolation, no token conflicts, simplified debugging
-
-### 4. Virtual/Downloadable Products
-
-Orders containing **ONLY** virtual or downloadable products are automatically marked as `completed` instead of `processing` when payment succeeds.
-
----
-
-## 🛠 REST Endpoints
-
-| Method | Endpoint                          | Description                        |
-|--------|-----------------------------------|------------------------------------|
-| GET    | `/yuno/v1/public-api-key`        | Returns public key for SDK initialization |
-| POST   | `/yuno/v1/checkout-session`      | Creates checkout session in Yuno |
-| POST   | `/yuno/v1/payments`              | Creates payment using oneTimeToken |
-| POST   | `/yuno/v1/confirm`               | Confirms payment and updates order status |
-| POST   | `/yuno/v1/check-order-status`    | Checks current order status |
-| POST   | `/yuno/v1/duplicate-order`       | Creates duplicate order for payment retry |
-| POST   | `/yuno/v1/webhook`               | Receives Yuno webhook events (secured with HMAC) |
-
----
-
-## 🔒 Security Features
-
-- ✅ **HMAC webhook verification** (x-hmac-signature)
-- ✅ **API key authentication** (x-api-key, x-secret)
-- ✅ **Server-side payment verification** (double-check with Yuno API)
-- ✅ **Order key validation** on sensitive endpoints
-- ✅ **Private keys never exposed** to frontend
-- ✅ **Race condition protection** (transient locks on webhook processing)
-
----
-
-## 📊 Order Status Flow
-
-```
-pending
-  │
-  ├─→ (payment approved) ─→ processing/completed
-  │
-  ├─→ (payment pending 3DS) ─→ pending (waits for webhook)
-  │                              │
-  │                              └─→ (webhook: succeeded) ─→ processing/completed
-  │                              └─→ (webhook: failed) ─→ failed
-  │
-  └─→ (payment rejected) ─→ failed
-```
-
----
-
-## 🐛 Debug Logging
-
-Enable **Debug** in plugin settings to log all API interactions:
-
-**View logs:**
-```
-WooCommerce → Status → Logs → Select "yuno-{date}.log"
-```
-
-**Log format:**
-```
-[YUNO] [INFO] Create payment: order_id=123 payment_id=yuno_xxx
-[YUNO] [ERROR] Payment verification failed: status=REJECTED
-```
-
----
-
-## ⚠️ Current Limitations
-
-- Single currency per order (uses WooCommerce order currency)
-- No split payments support yet
-- No installments UI (SDK handles if available)
-
----
-
-## 🧭 Recommended Next Steps
-
-- [ ] Add support for multiple payment methods (PSE, cash, etc.)
-- [ ] Implement order cancellation via Yuno API
-- [ ] Add refund support via WooCommerce admin
-- [ ] Support split payments configuration
-- [ ] Add installments selection UI
-- [ ] Multi-currency support with conversion rates
-- [ ] Advanced fraud detection rules
-- [ ] Payment method restrictions per country
-
----
-
-## 📋 Requirements
-
-- WordPress 5.0+
-- WooCommerce 5.0+
-- PHP 8.0+
+## Requirements
+
+- PHP 7.4+
+- WordPress 6.0+
+- WooCommerce 8.0+
+- Node.js (only for development / rebuilding block checkout assets)
 - Yuno merchant account with API credentials
 - HTTPS enabled (required for production)
 
 ---
 
-## 🔧 Troubleshooting
+## Installation
+
+### Manual Installation
+
+1. Upload the `yuno-payment-gateway` folder to `wp-content/plugins/`
+2. Activate the plugin in WordPress Admin
+3. Ensure WooCommerce is active
+4. Go to **WooCommerce > Settings > Payments > Yuno**
+5. Configure your Yuno credentials and enable the payment method
+
+### Development with wp-env
+
+Requires **Docker Desktop** running locally.
+
+```bash
+npm install          # Install @wordpress/env
+npm run env:start    # Create and start Docker containers
+npm run env:stop     # Stop containers (data preserved)
+npm run env:restart  # Stop + start (after .wp-env.json changes)
+npm run env:destroy  # Remove all containers and data
+npm run env:clean    # Reset WordPress to clean state
+```
+
+- **WordPress:** http://localhost:8888
+- **Credentials:** `admin` / `password`
+- **Plugin:** auto-installed and activated from `./yuno-payment-gateway`
+- **WooCommerce:** not included in `.wp-env.json` — must be installed manually
+
+---
+
+## Configuration
+
+All settings configured via **WooCommerce > Settings > Payments > Yuno**:
+
+| Setting | Description |
+|---------|-------------|
+| Enable | Enable/disable the payment method |
+| Checkout Title | Name displayed at checkout (default: "Yuno") |
+| Account ID | Yuno merchant account ID |
+| Public API Key | Frontend SDK key (determines environment) |
+| Private Secret Key | Backend-only API key (never exposed to frontend) |
+| Webhook API Key | `x-api-key` header for webhook authentication |
+| Webhook X-Secret | `x-secret` header for webhook authentication |
+| Webhook HMAC Secret | HMAC secret for webhook signature verification |
+| Split Enabled | Enable marketplace split payments |
+| Recipient ID | Seller recipient ID for split payments |
+| Commission % | Platform commission percentage (0-100, overrides fixed) |
+| Fixed Amount | Fixed commission in minor currency units |
+| Debug | Enable WC debug logging (`info`/`debug` levels; errors always log) |
+
+Credentials can also be set via environment variables or PHP constants (`wp-config.php`). WP options take priority.
+
+### Webhook Configuration
+
+Configure in your Yuno Dashboard:
+
+**URL:** `https://your-site.com/wp-json/yuno/v1/webhook`
+
+**Supported Events:**
+- `payment.succeeded` / `payment.purchase` — marks order as paid
+- `payment.pending` — logs event, adds order note (no status change)
+- `payment.failed` / `payment.rejected` / `payment.declined` — marks order as failed
+- `payment.chargeback` — marks order as on-hold for review
+- `payment.refunds` / `payment.refund` — creates WC refund (full or partial)
+
+---
+
+## Architecture
+
+```
+WooCommerce Checkout
+        | process_payment() -> redirect to order-pay page
+        v
+class-wc-gateway-yuno.php
+        | enqueue_scripts() -> loads Yuno SDK + api.js + checkout.js
+        | wp_localize_script() -> injects YUNO_WC config (incl. publicApiKey)
+        v
+checkout.js (state machine)
+        | checkOrderStatus() -> createCustomer() + getPublicApiKey() [parallel]
+        | -> getCheckoutSession() -> startCheckout() -> mountCheckout()
+        | -> user pays -> yunoCreatePayment(token) -> continuePayment()
+        | -> yunoPaymentResult() -> confirmOrder()
+        v
+api.js (fetch layer)
+        | WP REST nonce + order_key on every request
+        v
+rest-api.php (REST endpoints)
+        | server-side verification against Yuno API
+        v
+Yuno API (https://api[-env].y.uno)
+        |
+        +-> Webhook -> /yuno/v1/webhook -> rest-api.php
+```
+
+Both block and legacy checkout converge at the order-pay page — a single payment flow.
+
+### Payment Flow
+
+1. User submits checkout -> WC order created in `pending` (stock held but not reduced — `payment_complete()` reduces stock)
+2. Redirect to `/order-pay/{id}/`
+3. `checkout.js` runs preflight checks (redirects if already paid, auto-duplicates if failed)
+4. Customer created + public API key resolved in parallel
+5. Checkout session created (Full SDK / `SDK_CHECKOUT` workflow)
+6. Yuno SDK initializes via `startCheckout()` and mounts via `mountCheckout()`
+7. User selects payment method -> pay button shown
+8. User clicks Pay -> SDK tokenizes -> `yunoCreatePayment(oneTimeToken)` -> backend POST `/yuno/v1/payments` (includes split data if configured) -> `continuePayment()`
+9. `yunoPaymentResult` fires -> `confirmOrder` verifies with Yuno API
+10. SUCCESS/PENDING -> `confirmOrder` verifies -> redirect to thank-you page; FAILURE -> `resetSdkState()` + in-place retry
+
+---
+
+## REST Endpoints
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/yuno/v1/public-api-key` | Returns public API key |
+| POST | `/yuno/v1/customer` | Creates Yuno customer for order |
+| POST | `/yuno/v1/checkout-session` | Creates checkout session (Full SDK / `SDK_CHECKOUT`) |
+| POST | `/yuno/v1/payments` | Creates payment via Yuno API (one_time_token, split data) |
+| POST | `/yuno/v1/confirm` | Server-side payment verification + order update (PENDING treated as success) |
+| POST | `/yuno/v1/check-order-status` | Pre-flight status check (prevents double-pay) |
+| POST | `/yuno/v1/duplicate-order` | Creates retry order after failure |
+| POST | `/yuno/v1/webhook` | Receives HMAC-verified Yuno events |
+
+All endpoints (except webhook) require WP REST nonce and mandatory `order_key` for authentication.
+
+---
+
+## Security
+
+- **Server-side verification** — payment status always verified against Yuno API before updating WC order (PENDING/PROCESSING/REQUIRES_ACTION treated as auto-capture success)
+- **HMAC webhook verification** — three-layer check: `x-api-key`, `x-secret`, HMAC-SHA256 signature (hex + base64)
+- **Mandatory order key** — all REST endpoints require `order_key`; missing key returns HTTP 400
+- **Idempotent processing** — transient locks (30s TTL) and `is_paid()` checks prevent duplicate processing
+- **No sensitive data in responses** — raw API responses and exception messages never returned to client
+- **Redirect origin validation** — all frontend redirects validate URL origin before navigating
+- **PII redaction in logs** — phone numbers as last 4 digits, emails as boolean, full payloads never logged
+- **Private keys never exposed** — `PRIVATE_SECRET_KEY` is backend-only
+
+---
+
+## Plugin Structure
+
+```
+sdk-woocommerce/
+├── .github/
+│   └── workflows/
+│       └── deploy-to-wporg.yml             # WordPress.org deployment pipeline
+├── .wp-env.json                            # Docker/WordPress config
+├── Dockerfile                              # PHP 8.2 Apache image
+├── package.json                            # npm scripts for wp-env
+├── CLAUDE.md                               # Detailed dev documentation
+├── yuno-payment-gateway/
+│   ├── yuno-payment-gateway.php              # Plugin entry point + constants
+│   ├── uninstall.php                       # Cleanup on plugin deletion
+│   ├── package.json                        # Build tooling (@wordpress/scripts)
+│   ├── webpack.config.js                   # Custom webpack config (WC externals)
+│   ├── readme.txt                          # WordPress.org plugin directory readme
+│   ├── LICENSE                             # GPLv2 full license text
+│   ├── .gitattributes                      # export-ignore rules for git archive ZIPs
+│   ├── includes/
+│   │   ├── class-wc-gateway-yuno.php       # WC_Payment_Gateway subclass
+│   │   ├── class-wc-gateway-yuno-blocks.php # Block checkout integration
+│   │   └── rest-api.php                    # REST endpoints + webhook handling
+│   ├── src/
+│   │   └── blocks/
+│   │       └── yuno-blocks.js              # Block checkout React source
+│   ├── languages/
+│   │   └── yuno-payment-gateway.pot        # Translation template
+│   ├── wordpress_org_assets/               # WP.org directory marketing assets
+│   │   ├── banner-*.png                    # Plugin banners
+│   │   └── icon-*.png                      # Plugin icons
+│   └── assets/
+│       ├── js/
+│       │   ├── api.js                      # Frontend REST fetch wrappers
+│       │   ├── checkout.js                 # SDK orchestration + state machine
+│       │   └── blocks/                     # Compiled block output (committed)
+│       ├── css/
+│       │   └── checkout.css                # SDK container + processing overlay styles
+│       └── images/                         # Card brand SVG icons
+```
+
+---
+
+## Block Checkout Support
+
+The plugin supports both **legacy shortcode checkout** and **WooCommerce block-based checkout** (default since WC 8.3).
+
+Both checkout types use the same redirect-to-order-pay approach — `process_payment()` redirects the user to the order-pay page where the Yuno SDK handles payment.
+
+### Building Block Checkout Assets
+
+Compiled assets are committed to the repo — **no build step needed for production**. Only rebuild if you modify `src/blocks/yuno-blocks.js`:
+
+```bash
+cd yuno-payment-gateway
+npm install              # First time only
+npm run build            # Production build
+npm run start            # Development watch mode
+```
+
+### Compatibility
+
+- **WooCommerce 8.0+:** Block checkout supported
+- **WooCommerce < 8.0:** Block code silently skipped, legacy checkout works as before
+- The plugin declares `cart_checkout_blocks` and `custom_order_tables` (HPOS) compatibility via `FeaturesUtil`
+
+---
+
+## Order Status Flow
+
+```
+pending
+  |
+  +-> (payment approved/pending) -> processing (physical) / completed (virtual/downloadable)
+  |       Note: PENDING status is treated as auto-capture success in /confirm
+  |
+  +-> (webhook: succeeded) -> processing/completed
+  +-> (webhook: pending) -> pending (note added, no status change)
+  +-> (webhook: failed) -> failed
+  |
+  +-> (payment rejected) -> failed -> (auto-duplicate for retry)
+```
+
+---
+
+## Debugging
+
+1. Enable **Debug** in WooCommerce > Settings > Payments > Yuno
+2. View logs at **WooCommerce > Status > Logs > yuno-{date}.log**
+
+**Note:** Error and warning level logs are always recorded regardless of the debug setting. The debug flag only gates `info`/`debug`/`notice` levels.
+
+In local dev, logs also appear in `wp-content/debug.log` (WP_DEBUG_LOG enabled in `.wp-env.json`).
+
+---
+
+## Troubleshooting
 
 ### Orders stuck in "pending" status
-
-**Cause:** Webhook not configured or failing
-
-**Solution:**
-1. Configure webhook in Yuno Dashboard
-2. Verify webhook URL is accessible (not localhost)
-3. Check webhook headers match plugin settings
-4. Enable debug logs and check for webhook errors
-
-### "INVALID_CUSTOMER_FOR_TOKEN" error
-
-**Cause:** Token created with different customer than payment request
-
-**Solution:**
-This is fixed in v0.5.0+ with per-order customer strategy. Ensure you're using the latest version.
-
-### Payment succeeds but order stays "pending"
-
-**Cause:** Webhook verification failing or payment confirmation not triggered
-
-**Solution:**
-1. Check webhook logs in Yuno Dashboard
-2. Verify HMAC secret matches
-3. Check WordPress error logs for PHP errors
-4. Verify order-pay page redirects to order-received after payment
+- Verify webhook URL is configured in Yuno Dashboard
+- Ensure webhook URL is publicly accessible (not localhost)
+- Check webhook header values match plugin settings
+- Enable debug logs and check for webhook verification errors
 
 ### SDK not loading on order-pay page
+- Check browser console for errors
+- Verify PUBLIC_API_KEY is configured
+- Check network tab for failed API requests
+- Ensure order is in `pending` status
 
-**Cause:** JavaScript errors or missing PUBLIC_API_KEY
-
-**Solution:**
-1. Check browser console for errors
-2. Verify PUBLIC_API_KEY is configured
-3. Check network tab for failed API requests
-4. Ensure order is in `pending` status
-
----
-
-## 👨‍💻 Author
-
-**YUNO**
+### Payment succeeds but order stays "pending"
+- Check webhook logs in Yuno Dashboard
+- Verify HMAC secret matches
+- Check WooCommerce logs for verification errors
 
 ---
 
-## 📄 License
+## Changelog
 
-ISC
+### v1.0.0
+- Full SDK workflow (`SDK_CHECKOUT`) — backend-driven payment creation via `yunoCreatePayment` callback
+- WordPress.org directory submission preparation (`readme.txt`, `.pot` translation template, deploy workflow)
+- HPOS (`custom_order_tables`) compatibility declaration
+- New `/yuno/v1/payments` REST endpoint for server-side payment creation with idempotency keys
+- In-place retry on failure via `resetSdkState()` instead of order duplication
+- Payment creation transient lock (`yuno_pay_lock_{order_id}`) for concurrency safety
+- `early_redirect_paid_orders()` for instant redirect before page render
+- Card form configuration with required cardholder name
+- Processing overlay UI during payment creation
+- Removed `/yuno/v1/update-checkout-session` endpoint (no longer needed with Full SDK)
 
----
-
-## 📝 Changelog
+### v0.5.2
+- WooCommerce block-based checkout support
+- `AbstractPaymentMethodType` integration with redirect-to-order-pay flow
+- `@wordpress/scripts` build pipeline for React block component
+- `cart_checkout_blocks` feature compatibility declaration
+- Marketplace split payments (percent-based and fixed commission)
+- Security hardening: mandatory order_key, PII redaction, redirect validation
+- Production logging: error/warning always logged, structured metadata
+- Performance: static caching, parallelized API calls, batched order saves
+- Code quality: global constants, snake_case variables, console cleanup
 
 ### v0.5.0
-- ✅ Per-order customer creation strategy
-- ✅ Fixed INVALID_CUSTOMER_FOR_TOKEN error
-- ✅ Improved webhook handling with API verification
-- ✅ Virtual/downloadable products auto-complete
-- ✅ 3DS/authentication flow handling
-- ✅ Race condition protection on webhooks
-- ✅ Duplicate order creation for failed payments
-- ✅ Comprehensive debug logging
+- Per-order customer creation strategy
+- Fixed INVALID_CUSTOMER_FOR_TOKEN error
+- Improved webhook handling with API verification
+- Virtual/downloadable products auto-complete to `completed` status
+- 3DS/authentication flow handling
+- Race condition protection on webhooks
+- Duplicate order creation for failed payments
 
 ### v0.4.x
 - Initial release with basic payment flow
 - Checkout session creation
 - Payment processing with oneTimeToken
 - Basic webhook support
+
+---
+
+## Author
+
+**YUNO**
+
+## License
+
+GPLv2 or later
