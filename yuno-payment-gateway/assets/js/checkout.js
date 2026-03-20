@@ -290,7 +290,7 @@
         return;
       }
 
-      yunoInstance = await window.Yuno.initialize(publicApiKey);
+      yunoInstance = await window.Yuno.initialize(publicApiKey, state.orderId, { sdkType: 'woocommerce' });
 
       const RENDER_MODE_TYPE = "modal";
 

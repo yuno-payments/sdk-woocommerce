@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-WordPress plugin that integrates **Yuno Payments** as a WooCommerce payment gateway. It uses the **Yuno Web SDK** (v1.5) for frontend payment collection and a PHP REST API layer for server-side payment lifecycle management.
+WordPress plugin that integrates **Yuno Payments** as a WooCommerce payment gateway. It uses the **Yuno Web SDK** (v1.6) for frontend payment collection and a PHP REST API layer for server-side payment lifecycle management.
 
 - **Plugin version:** 1.0.0
 - **Plugin slug:** `yuno-payment-gateway`
@@ -133,7 +133,7 @@ Yuno API (https://api[-env].y.uno)
 3. `checkout.js` calls `checkOrderStatus()` — redirects if already paid, auto-duplicates if failed
 4. Creates customer via `createCustomer()` → POST `/yuno/v1/customer`
 5. Creates checkout session via `getCheckoutSession()` → POST `/yuno/v1/checkout-session` (workflow: Full SDK / `SDK_CHECKOUT`)
-6. `Yuno.initialize(publicApiKey)` → `yunoInstance.startCheckout({...})` → `yunoInstance.mountCheckout()`
+6. `Yuno.initialize(publicApiKey, undefined, { sdkType: 'woocommerce' })` → `yunoInstance.startCheckout({...})` → `yunoInstance.mountCheckout()`
 7. Pay button shown after `yunoPaymentMethodSelected` fires; user interacts with mounted SDK form
 8. User clicks Pay → `yunoInstance.startPayment()` → SDK tokenizes → `yunoCreatePayment(oneTimeToken)` callback fires → backend POST `/yuno/v1/payments` creates payment via Yuno API → `continuePayment()` resumes SDK flow
 9. `yunoPaymentResult(result)` callback fires with a status string → `confirmOrder()` → POST `/yuno/v1/confirm` verifies with Yuno API
@@ -421,6 +421,6 @@ npm run start            # Development watch mode
 
 ## External Dependencies
 
-- **Yuno Web SDK:** `https://sdk-web.y.uno/v1.5/main.js` (loaded via `wp_enqueue_script`)
+- **Yuno Web SDK:** `https://sdk-web.y.uno/v1.6/main.js` (loaded via `wp_enqueue_script`)
 - **@wordpress/env:** v10.37.0 (dev dependency, used only for local Docker environment)
 - **@wordpress/scripts:** ^28.0.0 (dev dependency in `yuno-payment-gateway/`, used to compile block checkout React code)
