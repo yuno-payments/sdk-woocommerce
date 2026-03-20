@@ -504,7 +504,7 @@ class WC_Gateway_Yuno extends WC_Payment_Gateway {
 
     wp_enqueue_script(
       'yuno-sdk',
-      'https://sdk-web.y.uno/v1.5/main.js',
+      'https://sdk-web.y.uno/v1.6/main.js',
       [],
       null,
       true
