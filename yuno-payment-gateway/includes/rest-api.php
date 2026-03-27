@@ -6,60 +6,95 @@ if (!defined('ABSPATH')) exit;
  * Routes
  * =========================
  *
- * Security model: Customer-facing endpoints use '__return_true' for the
- * permission_callback because they are secured via WooCommerce order key
- * validation — every handler calls yuno_get_order_from_request() which
- * requires a valid order_key parameter. Only the order owner (who received
- * the key via checkout redirect) can access their order's payment endpoints.
- * The webhook endpoint uses HMAC signature verification instead.
+ * Security model: Customer-facing endpoints use WP REST nonce verification
+ * (yuno_verify_rest_nonce) as the permission_callback. This validates the
+ * X-WP-Nonce header to provide CSRF protection while allowing guest checkout
+ * — WordPress generates valid nonces for anonymous sessions via cookies.
+ *
+ * In addition, each handler calls yuno_get_order_from_request() which requires
+ * a valid order_key parameter. Only the order owner (who received the key via
+ * checkout redirect) can access their order's payment endpoints.
+ *
+ * The webhook endpoint uses HMAC signature verification instead (server-to-server).
  */
+
+/**
+ * Verify WP REST nonce for customer-facing endpoints.
+ *
+ * Validates the X-WP-Nonce header sent by the frontend (api.js).
+ * Works for both logged-in users and guests — WordPress generates
+ * valid nonces for anonymous sessions using cookies.
+ *
+ * @param WP_REST_Request $request The incoming REST request.
+ * @return true|WP_Error True if nonce is valid, WP_Error otherwise.
+ */
+function yuno_verify_rest_nonce( WP_REST_Request $request ) {
+    $nonce = $request->get_header( 'X-WP-Nonce' );
+    if ( ! $nonce || ! wp_verify_nonce( $nonce, 'wp_rest' ) ) {
+        return new WP_Error(
+            'rest_forbidden',
+            __( 'Nonce verification failed.', 'yuno-payment-gateway' ),
+            array( 'status' => 403 )
+        );
+    }
+    return true;
+}
 
 add_action('rest_api_init', function () {
 
+    // Public API key (fallback — key is also injected server-side via wp_localize_script).
+    // Nonce-protected to prevent unauthenticated scraping.
     register_rest_route('yuno/v1', '/public-api-key', [
         'methods'             => 'GET',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'yuno_verify_rest_nonce',
         'callback'            => function () {
             return yuno_json(['publicApiKey' => yuno_get_env('PUBLIC_API_KEY', '')], 200);
         },
     ]);
 
+    // Checkout session creation. Nonce + order_key validation in handler.
     register_rest_route('yuno/v1', '/checkout-session', [
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'yuno_verify_rest_nonce',
         'callback'            => 'yuno_create_checkout_session',
     ]);
 
+    // Customer creation. Nonce + order_key validation in handler.
     register_rest_route('yuno/v1', '/customer', [
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'yuno_verify_rest_nonce',
         'callback'            => 'yuno_create_customer_endpoint',
     ]);
 
+    // Payment confirmation. Nonce + order_key + server-side Yuno API verification in handler.
     register_rest_route('yuno/v1', '/confirm', [
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'yuno_verify_rest_nonce',
         'callback'            => 'yuno_confirm_order_payment',
     ]);
 
+    // Order status check (preflight). Nonce + order_key validation in handler.
     register_rest_route('yuno/v1', '/check-order-status', [
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'yuno_verify_rest_nonce',
         'callback'            => 'yuno_check_order_status',
     ]);
 
+    // Duplicate order creation (retry after failure). Nonce + order_key validation in handler.
     register_rest_route('yuno/v1', '/duplicate-order', [
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'yuno_verify_rest_nonce',
         'callback'            => 'yuno_duplicate_order',
     ]);
 
+    // Payment creation. Nonce + order_key + transient lock in handler.
     register_rest_route('yuno/v1', '/payments', [
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'yuno_verify_rest_nonce',
         'callback'            => 'yuno_create_payment',
     ]);
 
+    // Webhook (server-to-server). Uses HMAC + API key + secret verification.
     register_rest_route('yuno/v1', '/webhook', [
         'methods'             => 'POST',
         'permission_callback' => 'yuno_verify_webhook_signature',
