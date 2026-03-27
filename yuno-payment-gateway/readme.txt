@@ -37,7 +37,7 @@ payments, and verify payment status. The specific server used depends on your AP
 configuration (production: `https://api.y.uno`, sandbox: `https://api-sandbox.y.uno`).
 
 **Yuno Web SDK:**
-This plugin loads the Yuno Web SDK (`https://sdk-web.y.uno/v1.5/main.js`) on the checkout
+This plugin loads the Yuno Web SDK (`https://sdk-web.y.uno/v1.6/main.js`) on the checkout
 page to render the secure payment form. This SDK is loaded from Yuno's servers for PCI
 compliance and security purposes — the SDK must be served from Yuno's infrastructure to
 maintain PCI DSS compliance and ensure secure payment data handling.
@@ -73,6 +73,31 @@ Yes. The plugin fully supports both the classic and block-based WooCommerce chec
 1. Yuno payment settings page in WooCommerce.
 2. Checkout page with Yuno payment form.
 3. Order confirmation with payment details.
+
+== Development ==
+
+The full source code for this plugin is available on GitHub:
+https://github.com/yuno-payments/sdk-woocommerce
+
+= Compiled JavaScript =
+
+The file `assets/js/blocks/yuno-blocks.js` is compiled from source using the
+WordPress build toolchain. The uncompiled source is located at
+`src/blocks/yuno-blocks.js`.
+
+To regenerate the compiled file from source:
+
+1. Install Node.js (v18 or later recommended).
+2. Navigate to the `yuno-payment-gateway/` directory.
+3. Run `npm install` to install build dependencies.
+4. Run `npm run build` to compile the source.
+
+The build configuration is defined in `webpack.config.js` and uses
+`@wordpress/scripts` (the official WordPress build tool).
+
+All other JavaScript and CSS files (`assets/js/api.js`, `assets/js/checkout.js`,
+`assets/css/checkout.css`) are human-readable source code and are not compiled
+or minified.
 
 == Changelog ==
 

@@ -1,5 +1,7 @@
 const defaultConfig = require('@wordpress/scripts/config/webpack.config');
 const WPDependencyExtractionPlugin = require('@wordpress/dependency-extraction-webpack-plugin');
+const TerserPlugin = require('terser-webpack-plugin');
+const webpack = require('webpack');
 const path = require('path');
 
 // Remove CleanWebpackPlugin (would delete api.js/checkout.js from assets/js/)
@@ -11,6 +13,17 @@ const plugins = defaultConfig.plugins.filter(
 );
 
 plugins.push(
+    new webpack.BannerPlugin({
+        banner: [
+            'Yuno Payment Gateway - WooCommerce Blocks Integration',
+            '',
+            'COMPILED FILE - Do not edit directly.',
+            'Source: src/blocks/yuno-blocks.js',
+            'Build:  npm run build (uses @wordpress/scripts)',
+            '',
+            '@see https://github.com/yuno-payments/sdk-woocommerce',
+        ].join('\n'),
+    }),
     new WPDependencyExtractionPlugin({
         requestToExternal(request) {
             if (request === '@woocommerce/blocks-registry') {
@@ -34,6 +47,19 @@ plugins.push(
 module.exports = {
     ...defaultConfig,
     plugins,
+    optimization: {
+        ...defaultConfig.optimization,
+        minimizer: [
+            new TerserPlugin({
+                extractComments: false,
+                terserOptions: {
+                    format: {
+                        comments: /COMPILED FILE/,
+                    },
+                },
+            }),
+        ],
+    },
     entry: {
         'blocks/yuno-blocks': path.resolve(__dirname, 'src/blocks/yuno-blocks.js'),
     },
