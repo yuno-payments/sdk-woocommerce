@@ -50,12 +50,12 @@ add_action('woocommerce_blocks_loaded', function () {
         return;
     }
 
-    require_once YUNO_PLUGIN_DIR . 'includes/class-wc-gateway-yuno-blocks.php';
+    require_once YUNO_PLUGIN_DIR . 'includes/class-yuno-gateway-blocks-support.php';
 
     add_action(
         'woocommerce_blocks_payment_method_type_registration',
         function ($registry) {
-            $registry->register(new WC_Gateway_Yuno_Blocks_Support());
+            $registry->register(new Yuno_Gateway_Blocks_Support());
         }
     );
 });
@@ -67,12 +67,12 @@ add_action('plugins_loaded', function () {
   }
 
   // Load the gateway class
-  require_once YUNO_PLUGIN_DIR . 'includes/class-wc-gateway-yuno.php';
+  require_once YUNO_PLUGIN_DIR . 'includes/class-yuno-gateway.php';
   require_once YUNO_PLUGIN_DIR . 'includes/rest-api.php';
 
   // Payment Gateway Registration
   add_filter('woocommerce_payment_gateways', function ($gateways) {
-    $gateways[] = 'WC_Gateway_Yuno';
+    $gateways[] = 'Yuno_Gateway';
     return $gateways;
   });
 
