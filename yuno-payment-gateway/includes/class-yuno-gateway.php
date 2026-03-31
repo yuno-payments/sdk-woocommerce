@@ -1,7 +1,7 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-class WC_Gateway_Yuno extends WC_Payment_Gateway {
+class Yuno_Gateway extends WC_Payment_Gateway {
 
   public function __construct() {
     $this->id                 = YUNO_GATEWAY_ID;
@@ -426,7 +426,7 @@ class WC_Gateway_Yuno extends WC_Payment_Gateway {
 
     echo '<div class="yuno-order-item">';
     echo '<span class="yuno-order-label">' . esc_html__('Total:', 'yuno-payment-gateway') . '</span>';
-    echo '<span class="yuno-order-value yuno-order-total" id="yuno-order-total">' . $total_html . '</span>';
+    echo '<span class="yuno-order-value yuno-order-total" id="yuno-order-total">' . wp_kses_post( $order->get_formatted_order_total() ) . '</span>';
     echo '</div>';
 
     echo '<div class="yuno-order-item">';

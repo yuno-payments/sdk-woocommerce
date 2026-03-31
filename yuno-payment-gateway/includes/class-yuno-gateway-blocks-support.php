@@ -3,7 +3,7 @@ if (!defined('ABSPATH')) exit;
 
 use Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType;
 
-final class WC_Gateway_Yuno_Blocks_Support extends AbstractPaymentMethodType {
+final class Yuno_Gateway_Blocks_Support extends AbstractPaymentMethodType {
 
     protected $name = 'yuno';
 
@@ -16,7 +16,7 @@ final class WC_Gateway_Yuno_Blocks_Support extends AbstractPaymentMethodType {
     }
 
     public function is_active() {
-        return $this->gateway instanceof WC_Gateway_Yuno
+        return $this->gateway instanceof Yuno_Gateway
             && $this->gateway->is_available();
     }
 
