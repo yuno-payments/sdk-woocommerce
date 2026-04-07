@@ -341,6 +341,107 @@ In local dev, logs also appear in `wp-content/debug.log` (WP_DEBUG_LOG enabled i
 
 ---
 
+## Releasing to WordPress.org
+
+The plugin is distributed via the [WordPress Plugin Directory](https://wordpress.org/plugins/yuno-payment-gateway/). WordPress.org uses **SVN** (Subversion) as its distribution system. We use GitHub as our primary development repository and sync to SVN automatically via GitHub Actions.
+
+### How GitHub and SVN Work Together
+
+- **GitHub** is the source of truth — all development happens here (branches, PRs, code review)
+- **SVN** is the distribution channel — WordPress.org reads from SVN to serve the plugin to users
+- **Sync is one-way:** GitHub → SVN, triggered automatically when a GitHub Release is created
+- **Never edit SVN directly** (except rare readme-only hotfixes)
+
+### SVN Repository Structure
+
+```
+https://plugins.svn.wordpress.org/yuno-payment-gateway/
+├── trunk/          ← Latest plugin code (synced from GitHub master)
+├── tags/
+│   └── X.Y.Z/     ← Tagged releases (immutable snapshots)
+└── assets/          ← Banners, icons, screenshots (NOT inside trunk)
+    ├── banner-772x250.png
+    ├── banner-1544x500.png
+    ├── icon-128x128.png
+    └── icon-256x256.png
+```
+
+### Publishing a New Version
+
+1. **Develop** on feature branches, merge PRs to `master`
+2. **Bump version** in all 4 files (must match):
+   - `yuno-payment-gateway/yuno-payment-gateway.php` — plugin header (`Version: X.Y.Z`)
+   - `yuno-payment-gateway/yuno-payment-gateway.php` — constant (`YUNO_WC_VERSION`)
+   - `yuno-payment-gateway/readme.txt` — `Stable tag: X.Y.Z`
+   - `yuno-payment-gateway/package.json` — `"version": "X.Y.Z"`
+3. **Add changelog entry** in `readme.txt` under `== Changelog ==`
+4. **Commit and push** to `master`
+5. **Create a GitHub Release:**
+   ```bash
+   gh release create X.Y.Z --target master --title "vX.Y.Z" --notes "Release notes here."
+   ```
+6. The **deploy workflow** (`.github/workflows/deploy-to-wporg.yml`) triggers automatically:
+   - Builds the plugin (`npm ci && npm run build`)
+   - Pushes plugin code to SVN `trunk/`
+   - Creates SVN tag `tags/X.Y.Z/`
+   - Pushes marketing assets from `wordpress_org_assets/` to SVN `assets/`
+7. **Verify** at https://wordpress.org/plugins/yuno-payment-gateway/
+
+### Readme-Only Updates (no version bump needed)
+
+For documentation-only changes (typos, FAQ updates, "Tested up to" bumps):
+- Update `readme.txt` in `master`, keep `Stable tag` pointing to the current version
+- Trigger the deploy workflow or update SVN `trunk/readme.txt` directly
+- No new tag is needed
+
+### Marketing Assets
+
+Source files live in `yuno-payment-gateway/wordpress_org_assets/`. The deploy action maps these to the SVN `/assets/` directory automatically.
+
+| File | Dimensions | Purpose |
+|------|-----------|---------|
+| `banner-772x250.png` | 772x250 | Plugin page banner |
+| `banner-1544x500.png` | 1544x500 | Hi-DPI banner |
+| `icon-128x128.png` | 128x128 | Plugin icon |
+| `icon-256x256.png` | 256x256 | Hi-DPI icon |
+| `screenshot-N.png` | any | Screenshots (must match `== Screenshots ==` in readme) |
+
+### SVN Credentials
+
+- **Username:** `yunocheckout` (case-sensitive)
+- **Password:** Generated at WordPress.org → Profile → Account & Security → SVN credentials
+- **GitHub Secrets:** `SVN_USERNAME` and `SVN_PASSWORD` must be configured in the repo's Actions secrets for the deploy workflow to work
+
+### Manual SVN Commands (fallback)
+
+Only needed if the GitHub Actions workflow fails or for debugging:
+
+```bash
+# Install SVN (macOS)
+brew install svn
+
+# Checkout the repository
+svn co https://plugins.svn.wordpress.org/yuno-payment-gateway svn-yuno
+
+# After modifying files in trunk/
+svn add --force trunk/*
+svn ci -m "Release X.Y.Z" --username yunocheckout
+
+# Tag a release (copy trunk to tags)
+svn cp trunk tags/X.Y.Z
+svn ci -m "Tag X.Y.Z" --username yunocheckout
+```
+
+### Important Rules
+
+- Each SVN commit rebuilds ALL version ZIPs — batch changes, don't commit frequently
+- Tag names: numbers and periods only (e.g., `1.0.0`, not `v1.0.0`)
+- `Stable tag` in `readme.txt` must point to a specific tag, never `trunk`
+- Assets (banners, icons) go in SVN `/assets/`, NOT inside `trunk/` or `tags/`
+- It may take up to 72 hours for WordPress.org search results to update after a new release
+
+---
+
 ## Author
 
 **YUNO**
