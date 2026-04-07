@@ -68,12 +68,6 @@ payment methods depending on your region and provider configuration.
 
 Yes. The plugin fully supports both the classic and block-based WooCommerce checkout.
 
-== Screenshots ==
-
-1. Yuno payment settings page in WooCommerce.
-2. Checkout page with Yuno payment form.
-3. Order confirmation with payment details.
-
 == Development ==
 
 The full source code for this plugin is available on GitHub:
