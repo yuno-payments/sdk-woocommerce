@@ -299,48 +299,6 @@ In local dev, logs also appear in `wp-content/debug.log` (WP_DEBUG_LOG enabled i
 
 ---
 
-## Changelog
-
-### v1.0.0
-- Full SDK workflow (`SDK_CHECKOUT`) — backend-driven payment creation via `yunoCreatePayment` callback
-- WordPress.org directory submission preparation (`readme.txt`, `.pot` translation template, deploy workflow)
-- HPOS (`custom_order_tables`) compatibility declaration
-- New `/yuno/v1/payments` REST endpoint for server-side payment creation with idempotency keys
-- In-place retry on failure via `resetSdkState()` instead of order duplication
-- Payment creation transient lock (`yuno_pay_lock_{order_id}`) for concurrency safety
-- `early_redirect_paid_orders()` for instant redirect before page render
-- Card form configuration with required cardholder name
-- Processing overlay UI during payment creation
-- Removed `/yuno/v1/update-checkout-session` endpoint (no longer needed with Full SDK)
-
-### v0.5.2
-- WooCommerce block-based checkout support
-- `AbstractPaymentMethodType` integration with redirect-to-order-pay flow
-- `@wordpress/scripts` build pipeline for React block component
-- `cart_checkout_blocks` feature compatibility declaration
-- Marketplace split payments (percent-based and fixed commission)
-- Security hardening: mandatory order_key, PII redaction, redirect validation
-- Production logging: error/warning always logged, structured metadata
-- Performance: static caching, parallelized API calls, batched order saves
-- Code quality: global constants, snake_case variables, console cleanup
-
-### v0.5.0
-- Per-order customer creation strategy
-- Fixed INVALID_CUSTOMER_FOR_TOKEN error
-- Improved webhook handling with API verification
-- Virtual/downloadable products auto-complete to `completed` status
-- 3DS/authentication flow handling
-- Race condition protection on webhooks
-- Duplicate order creation for failed payments
-
-### v0.4.x
-- Initial release with basic payment flow
-- Checkout session creation
-- Payment processing with oneTimeToken
-- Basic webhook support
-
----
-
 ## Releasing to WordPress.org
 
 The plugin is distributed via the [WordPress Plugin Directory](https://wordpress.org/plugins/yuno-payment-gateway/). WordPress.org uses **SVN** (Subversion) as its distribution system. We use GitHub as our primary development repository and sync to SVN automatically via GitHub Actions.
@@ -439,6 +397,48 @@ svn ci -m "Tag X.Y.Z" --username yunocheckout
 - `Stable tag` in `readme.txt` must point to a specific tag, never `trunk`
 - Assets (banners, icons) go in SVN `/assets/`, NOT inside `trunk/` or `tags/`
 - It may take up to 72 hours for WordPress.org search results to update after a new release
+
+---
+
+## Changelog
+
+### v1.0.0
+- Full SDK workflow (`SDK_CHECKOUT`) — backend-driven payment creation via `yunoCreatePayment` callback
+- WordPress.org directory submission preparation (`readme.txt`, `.pot` translation template, deploy workflow)
+- HPOS (`custom_order_tables`) compatibility declaration
+- New `/yuno/v1/payments` REST endpoint for server-side payment creation with idempotency keys
+- In-place retry on failure via `resetSdkState()` instead of order duplication
+- Payment creation transient lock (`yuno_pay_lock_{order_id}`) for concurrency safety
+- `early_redirect_paid_orders()` for instant redirect before page render
+- Card form configuration with required cardholder name
+- Processing overlay UI during payment creation
+- Removed `/yuno/v1/update-checkout-session` endpoint (no longer needed with Full SDK)
+
+### v0.5.2
+- WooCommerce block-based checkout support
+- `AbstractPaymentMethodType` integration with redirect-to-order-pay flow
+- `@wordpress/scripts` build pipeline for React block component
+- `cart_checkout_blocks` feature compatibility declaration
+- Marketplace split payments (percent-based and fixed commission)
+- Security hardening: mandatory order_key, PII redaction, redirect validation
+- Production logging: error/warning always logged, structured metadata
+- Performance: static caching, parallelized API calls, batched order saves
+- Code quality: global constants, snake_case variables, console cleanup
+
+### v0.5.0
+- Per-order customer creation strategy
+- Fixed INVALID_CUSTOMER_FOR_TOKEN error
+- Improved webhook handling with API verification
+- Virtual/downloadable products auto-complete to `completed` status
+- 3DS/authentication flow handling
+- Race condition protection on webhooks
+- Duplicate order creation for failed payments
+
+### v0.4.x
+- Initial release with basic payment flow
+- Checkout session creation
+- Payment processing with oneTimeToken
+- Basic webhook support
 
 ---
 
