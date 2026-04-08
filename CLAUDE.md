@@ -52,9 +52,6 @@ npm run env:clean    # Reset WordPress to clean state
 
 ```
 sdk-woocommerce/
-├── .github/
-│   └── workflows/
-│       └── deploy-to-wporg.yml           # WordPress.org deployment pipeline
 ├── .wp-env.json                          # wp-env Docker/WordPress config
 ├── Dockerfile                            # PHP 8.2 Apache image (soap, mysqli, pdo)
 ├── package.json                          # npm scripts for wp-env
@@ -424,3 +421,101 @@ npm run start            # Development watch mode
 - **Yuno Web SDK:** `https://sdk-web.y.uno/v1.6/main.js` (loaded via `wp_enqueue_script`)
 - **@wordpress/env:** v10.37.0 (dev dependency, used only for local Docker environment)
 - **@wordpress/scripts:** ^28.0.0 (dev dependency in `yuno-payment-gateway/`, used to compile block checkout React code)
+
+---
+
+## WordPress.org SVN Release
+
+The plugin is published to WordPress.org via SVN. GitHub Actions are not available — releases are done manually.
+
+### Paths
+
+| Location | Path |
+|----------|------|
+| Git plugin dir | `./yuno-payment-gateway/` |
+| SVN working copy | `~/svn/yuno-payment-gateway/` |
+| SVN remote | `https://plugins.svn.wordpress.org/yuno-payment-gateway` |
+| SVN username | `yunocheckout` |
+| Plugin page | `https://wordpress.org/plugins/yuno-payment-gateway/` |
+
+### Release Process (Claude-executable)
+
+**Prerequisite:** All code changes must be merged to `master` and the local `master` branch must be up to date (`git checkout master && git pull`) before starting the release. The release syncs from the local git working directory to SVN.
+
+When asked to "release to WordPress.org", "deploy to SVN", or "publish the plugin":
+
+**1. Verify versions match** in `yuno-payment-gateway.php` (Version header + `YUNO_WC_VERSION`), `readme.txt` (Stable tag), and `package.json` (version).
+
+**2. Build:**
+```bash
+cd yuno-payment-gateway && npm ci && npm run build
+```
+
+**3. Sync plugin files to SVN trunk:**
+```bash
+rsync -avz --delete \
+    --exclude='node_modules/' --exclude='wordpress_org_assets/' \
+    --exclude='.gitattributes' --exclude='.gitignore' \
+    --exclude='package-lock.json' --exclude='.DS_Store' \
+    ./yuno-payment-gateway/ ~/svn/yuno-payment-gateway/trunk/
+```
+
+**4. Sync marketing assets to SVN assets:**
+```bash
+rsync -avz --delete --exclude='.DS_Store' \
+    ./yuno-payment-gateway/wordpress_org_assets/ ~/svn/yuno-payment-gateway/assets/
+```
+
+**5. Register new/deleted files:**
+```bash
+cd ~/svn/yuno-payment-gateway
+svn status | grep '^\?' | awk '{print $2}' | xargs -I{} svn add "{}"
+svn status | grep '^\!' | awk '{print $2}' | xargs -I{} svn rm "{}"
+```
+
+**6. Set mime-type on any new image files in assets/:**
+```bash
+svn propset svn:mime-type image/png assets/<filename>.png
+```
+
+**7. Review** — show `svn status` output and ask for confirmation before committing.
+
+**8. Commit** — the user must run this in a separate terminal (SVN requires interactive password):
+```bash
+cd ~/svn/yuno-payment-gateway
+svn commit -m "Release version X.Y.Z" --username yunocheckout
+```
+
+**9. Tag the release** — the user runs this in a separate terminal:
+```bash
+cd ~/svn/yuno-payment-gateway
+svn update tags --set-depth immediates
+svn copy trunk tags/X.Y.Z
+svn commit -m "Tag version X.Y.Z" --username yunocheckout
+```
+
+**10. Verify** — check that the tag exists:
+```bash
+svn ls https://plugins.svn.wordpress.org/yuno-payment-gateway/tags/X.Y.Z/
+```
+
+### Version Bump Checklist
+
+When bumping version, update ALL 4 files:
+1. `yuno-payment-gateway/yuno-payment-gateway.php` — `Version:` in plugin header
+2. `yuno-payment-gateway/yuno-payment-gateway.php` — `YUNO_WC_VERSION` constant
+3. `yuno-payment-gateway/readme.txt` — `Stable tag:`
+4. `yuno-payment-gateway/package.json` — `"version"`
+
+### Readme-Only Updates
+
+For documentation-only changes (no code changes), sync to SVN trunk and commit without creating a new tag. Keep `Stable tag` pointing to the current version.
+
+### Important Rules
+
+- Each SVN commit rebuilds ALL version ZIPs — batch changes together
+- Tag names: numbers and periods only (e.g., `1.0.0`, not `v1.0.0`)
+- `Stable tag` must point to a specific tag, never `trunk`
+- Marketing assets go in SVN `/assets/`, NOT inside `trunk/`
+- All image files in SVN `/assets/` must have `svn:mime-type` property set
+- SVN commits require interactive password — user must run in a separate terminal

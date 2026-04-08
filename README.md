@@ -186,9 +186,6 @@ All endpoints (except webhook) require WP REST nonce and mandatory `order_key` f
 
 ```
 sdk-woocommerce/
-├── .github/
-│   └── workflows/
-│       └── deploy-to-wporg.yml             # WordPress.org deployment pipeline
 ├── .wp-env.json                            # Docker/WordPress config
 ├── Dockerfile                              # PHP 8.2 Apache image
 ├── package.json                            # npm scripts for wp-env
@@ -301,14 +298,20 @@ In local dev, logs also appear in `wp-content/debug.log` (WP_DEBUG_LOG enabled i
 
 ## Releasing to WordPress.org
 
-The plugin is distributed via the [WordPress Plugin Directory](https://wordpress.org/plugins/yuno-payment-gateway/). WordPress.org uses **SVN** (Subversion) as its distribution system. We use GitHub as our primary development repository and sync to SVN automatically via GitHub Actions.
+The plugin is distributed via the [WordPress Plugin Directory](https://wordpress.org/plugins/yuno-payment-gateway/). WordPress.org uses **SVN** (Subversion) as its distribution system. We use GitHub as our primary development repository and sync to SVN manually.
 
 ### How GitHub and SVN Work Together
 
 - **GitHub** is the source of truth — all development happens here (branches, PRs, code review)
 - **SVN** is the distribution channel — WordPress.org reads from SVN to serve the plugin to users
-- **Sync is one-way:** GitHub → SVN, triggered automatically when a GitHub Release is created
+- **Sync is one-way:** GitHub → SVN, done manually after merging to `master`
 - **Never edit SVN directly** (except rare readme-only hotfixes)
+
+### Prerequisites
+
+- **SVN installed:** `brew install subversion` (macOS)
+- **SVN working copy:** `~/svn/yuno-payment-gateway/` (persistent checkout, created once)
+- **SVN credentials:** Username `yunocheckout`, password generated at WordPress.org → Profile → Account & Security → SVN credentials
 
 ### SVN Repository Structure
 
@@ -324,6 +327,17 @@ https://plugins.svn.wordpress.org/yuno-payment-gateway/
     └── icon-256x256.png
 ```
 
+### One-Time Setup
+
+```bash
+brew install subversion
+mkdir -p ~/svn
+svn checkout https://plugins.svn.wordpress.org/yuno-payment-gateway \
+    ~/svn/yuno-payment-gateway --depth immediates --username yunocheckout
+svn update ~/svn/yuno-payment-gateway/trunk --set-depth infinity
+svn update ~/svn/yuno-payment-gateway/assets --set-depth infinity
+```
+
 ### Publishing a New Version
 
 1. **Develop** on feature branches, merge PRs to `master`
@@ -334,27 +348,60 @@ https://plugins.svn.wordpress.org/yuno-payment-gateway/
    - `yuno-payment-gateway/package.json` — `"version": "X.Y.Z"`
 3. **Add changelog entry** in `readme.txt` under `== Changelog ==`
 4. **Commit and push** to `master`
-5. **Create a GitHub Release:**
+5. **Build the plugin:**
    ```bash
-   gh release create X.Y.Z --target master --title "vX.Y.Z" --notes "Release notes here."
+   cd yuno-payment-gateway && npm ci && npm run build
    ```
-6. The **deploy workflow** (`.github/workflows/deploy-to-wporg.yml`) triggers automatically:
-   - Builds the plugin (`npm ci && npm run build`)
-   - Pushes plugin code to SVN `trunk/`
-   - Creates SVN tag `tags/X.Y.Z/`
-   - Pushes marketing assets from `wordpress_org_assets/` to SVN `assets/`
-7. **Verify** at https://wordpress.org/plugins/yuno-payment-gateway/
+6. **Sync to SVN trunk:**
+   ```bash
+   rsync -avz --delete \
+       --exclude='node_modules/' --exclude='wordpress_org_assets/' \
+       --exclude='.gitattributes' --exclude='.gitignore' \
+       --exclude='package-lock.json' --exclude='.DS_Store' \
+       ./yuno-payment-gateway/ ~/svn/yuno-payment-gateway/trunk/
+   ```
+7. **Sync marketing assets to SVN:**
+   ```bash
+   rsync -avz --delete --exclude='.DS_Store' \
+       ./yuno-payment-gateway/wordpress_org_assets/ ~/svn/yuno-payment-gateway/assets/
+   ```
+8. **Register new/deleted files with SVN:**
+   ```bash
+   cd ~/svn/yuno-payment-gateway
+   svn status | grep '^\?' | awk '{print $2}' | xargs -I{} svn add "{}"
+   svn status | grep '^\!' | awk '{print $2}' | xargs -I{} svn rm "{}"
+   ```
+9. **Set mime-type on any new image assets:**
+   ```bash
+   svn propset svn:mime-type image/png assets/banner-772x250.png
+   svn propset svn:mime-type image/png assets/banner-1544x500.png
+   svn propset svn:mime-type image/png assets/icon-128x128.png
+   svn propset svn:mime-type image/png assets/icon-256x256.png
+   ```
+10. **Review and commit:**
+    ```bash
+    svn status
+    svn commit -m "Release version X.Y.Z" --username yunocheckout
+    ```
+11. **Tag the release:**
+    ```bash
+    svn update tags --set-depth immediates
+    svn copy trunk tags/X.Y.Z
+    svn commit -m "Tag version X.Y.Z" --username yunocheckout
+    ```
+12. **Verify** at https://wordpress.org/plugins/yuno-payment-gateway/
 
 ### Readme-Only Updates (no version bump needed)
 
 For documentation-only changes (typos, FAQ updates, "Tested up to" bumps):
-- Update `readme.txt` in `master`, keep `Stable tag` pointing to the current version
-- Trigger the deploy workflow or update SVN `trunk/readme.txt` directly
-- No new tag is needed
+1. Update `readme.txt` in `master` and push
+2. Sync to SVN trunk using `rsync` (steps 6-8 above)
+3. Commit to SVN — no new tag needed
+4. Keep `Stable tag` pointing to the current version
 
 ### Marketing Assets
 
-Source files live in `yuno-payment-gateway/wordpress_org_assets/`. The deploy action maps these to the SVN `/assets/` directory automatically.
+Source files live in `yuno-payment-gateway/wordpress_org_assets/`. They are synced to SVN `/assets/` during the release process.
 
 | File | Dimensions | Purpose |
 |------|-----------|---------|
@@ -364,31 +411,7 @@ Source files live in `yuno-payment-gateway/wordpress_org_assets/`. The deploy ac
 | `icon-256x256.png` | 256x256 | Hi-DPI icon |
 | `screenshot-N.png` | any | Screenshots (must match `== Screenshots ==` in readme) |
 
-### SVN Credentials
-
-- **Username:** `yunocheckout` (case-sensitive)
-- **Password:** Generated at WordPress.org → Profile → Account & Security → SVN credentials
-- **GitHub Secrets:** `SVN_USERNAME` and `SVN_PASSWORD` must be configured in the repo's Actions secrets for the deploy workflow to work
-
-### Manual SVN Commands (fallback)
-
-Only needed if the GitHub Actions workflow fails or for debugging:
-
-```bash
-# Install SVN (macOS)
-brew install svn
-
-# Checkout the repository
-svn co https://plugins.svn.wordpress.org/yuno-payment-gateway svn-yuno
-
-# After modifying files in trunk/
-svn add --force trunk/*
-svn ci -m "Release X.Y.Z" --username yunocheckout
-
-# Tag a release (copy trunk to tags)
-svn cp trunk tags/X.Y.Z
-svn ci -m "Tag X.Y.Z" --username yunocheckout
-```
+All image files in SVN `/assets/` must have `svn:mime-type` property set (e.g., `image/png`) to prevent browsers from downloading them instead of displaying them.
 
 ### Important Rules
 
