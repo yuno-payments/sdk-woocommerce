@@ -440,6 +440,8 @@ The plugin is published to WordPress.org via SVN. GitHub Actions are not availab
 
 ### Release Process (Claude-executable)
 
+**Prerequisite:** All code changes must be merged to `master` and the local `master` branch must be up to date (`git checkout master && git pull`) before starting the release. The release syncs from the local git working directory to SVN.
+
 When asked to "release to WordPress.org", "deploy to SVN", or "publish the plugin":
 
 **1. Verify versions match** in `yuno-payment-gateway.php` (Version header + `YUNO_WC_VERSION`), `readme.txt` (Stable tag), and `package.json` (version).
