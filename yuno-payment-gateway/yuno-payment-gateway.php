@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Yuno Payment Gateway
  * Description:       Accept payments through Yuno's payment orchestration platform.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Yuno
@@ -18,7 +18,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('YUNO_WC_VERSION', '1.0.0');
+define('YUNO_WC_VERSION', '1.0.1');
 define('YUNO_GATEWAY_ID', 'yuno');
 define('YUNO_STATUS_SUCCESS', ['SUCCEEDED', 'VERIFIED', 'APPROVED', 'PAYED']);
 define('YUNO_STATUS_FAILURE', ['REJECTED', 'DECLINED', 'CANCELLED', 'ERROR', 'EXPIRED', 'FAILED']);
