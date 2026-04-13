@@ -318,7 +318,6 @@
          * Must call continuePayment() when done (in finally block).
          */
         yunoCreatePayment: async (oneTimeToken) => {
-          console.log('[YUNO] Creating payment with token:', oneTimeToken);
           if (state.paid) return;
           setPayButtonDisabled(true);
           showProcessingOverlay();
@@ -357,7 +356,6 @@
          * Called when user selects a payment method
          */
         yunoPaymentMethodSelected: (data) => {
-          console.log('YUNO Payment Method Selected:', data);
           state.selectedPaymentMethod = data?.type;
 
           // Show Pay button now that a method is selected
@@ -370,7 +368,6 @@
          * We confirm the Woo order by verifying with our backend.
          */
         yunoPaymentResult: async (result) => {
-          console.log('YUNO Payment Result:', result);
           // Show processing overlay for all statuses
           showProcessingOverlay();
 

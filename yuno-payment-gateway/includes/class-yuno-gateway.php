@@ -177,6 +177,13 @@ class Yuno_Gateway extends WC_Payment_Gateway {
         'default'     => 'Select your preferred payment method on the next step',
         'desc_tip'    => true,
       ],
+      'hide_payment_selection' => [
+        'title'       => 'Hide Payment Selection',
+        'type'        => 'checkbox',
+        'label'       => 'Hide payment method selection when Yuno is the only gateway',
+        'default'     => 'no',
+        'description' => 'When enabled and Yuno is the only active payment gateway, the payment method selection will be hidden on checkout. Legacy checkout hides the radio buttons; block checkout hides the entire payment section.',
+      ],
       'account_id' => [
         'title'       => 'ACCOUNT_ID',
         'type'        => 'text',
@@ -240,13 +247,6 @@ class Yuno_Gateway extends WC_Payment_Gateway {
       ],
 
       // Webhook security settings
-      'webhook_hmac_secret' => [
-        'title'       => 'Webhook HMAC Secret',
-        'type'        => 'password',
-        'description' => 'Client Secret Key from Yuno Dashboard (Webhooks section). Used to verify webhook signatures.',
-        'default'     => '',
-        'desc_tip'    => true,
-      ],
       'webhook_api_key' => [
         'title'       => 'Webhook API Key',
         'type'        => 'password',
@@ -258,6 +258,13 @@ class Yuno_Gateway extends WC_Payment_Gateway {
         'title'       => 'Webhook X-Secret',
         'type'        => 'password',
         'description' => 'x-secret header value configured in Yuno Dashboard webhooks.',
+        'default'     => '',
+        'desc_tip'    => true,
+      ],
+      'webhook_hmac_secret' => [
+        'title'       => 'Webhook HMAC Secret',
+        'type'        => 'password',
+        'description' => 'Client Secret Key from Yuno Dashboard (Webhooks section). Used to verify webhook signatures.',
         'default'     => '',
         'desc_tip'    => true,
       ],
@@ -344,6 +351,14 @@ class Yuno_Gateway extends WC_Payment_Gateway {
     if ($account === '' || $public_api_key === '' || $private_secret_key === '') return false;
 
     return true;
+  }
+
+  private function is_yuno_only_gateway() {
+    if (!class_exists('WC_Payment_Gateways')) {
+      return false;
+    }
+    $gateways = WC()->payment_gateways()->get_available_payment_gateways();
+    return count($gateways) === 1 && isset($gateways[YUNO_GATEWAY_ID]);
   }
 
   public function process_payment($order_id) {
@@ -479,6 +494,14 @@ class Yuno_Gateway extends WC_Payment_Gateway {
         [],
         YUNO_WC_VERSION
       );
+
+      if ($this->get_option('hide_payment_selection', 'no') === 'yes' && $this->is_yuno_only_gateway()) {
+        $hide_css  = '.woocommerce-checkout #payment ul.payment_methods { display: none !important; }';
+        $hide_css .= '.woocommerce-checkout #payment .payment_box { display: none !important; }';
+        $hide_css .= '.wp-block-woocommerce-checkout-payment-block { display: none !important; }';
+        wp_add_inline_style('yuno-checkout', $hide_css);
+      }
+
       return;
     }
 
