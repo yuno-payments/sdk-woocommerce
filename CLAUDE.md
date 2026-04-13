@@ -46,6 +46,58 @@ npm run env:clean    # Reset WordPress to clean state
 - **WooCommerce:** not included in `.wp-env.json` — must be installed manually in the dev environment
 - **WP_DEBUG:** enabled, logs to `wp-content/debug.log`
 
+### Local Webhook Testing (ngrok)
+
+Yuno requires HTTPS URLs for webhook endpoints. The local dev environment runs on `http://localhost:8888`, which Yuno's servers cannot reach. To test webhooks locally, use [ngrok](https://ngrok.com) to create a public HTTPS tunnel to the local WordPress instance.
+
+**When is this needed?** Any task that involves the webhook flow requires ngrok to be running. This includes: testing payment completion (webhooks confirm payment status), refunds, chargebacks, or any change to `rest-api.php` webhook handlers. If the user asks to test or develop anything involving webhooks, payment status updates from Yuno, or end-to-end payment flows, proactively set up the ngrok tunnel before testing.
+
+**One-time setup:**
+
+1. Install ngrok:
+   ```bash
+   brew install ngrok
+   ```
+2. Create a free account at [ngrok.com](https://ngrok.com) and copy the authtoken from [dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken)
+3. Save the authtoken:
+   ```bash
+   ngrok config add-authtoken YOUR_TOKEN
+   ```
+
+**Each development session:**
+
+1. Ensure the local environment is running (`npm run env:start`)
+2. Start the tunnel:
+   ```bash
+   ngrok http 8888
+   ```
+3. Copy the HTTPS URL from ngrok output (e.g., `https://abc123.ngrok-free.dev`)
+4. Update WordPress to use the ngrok URL:
+   ```bash
+   npx wp-env run cli wp option update siteurl https://abc123.ngrok-free.dev
+   npx wp-env run cli wp option update home https://abc123.ngrok-free.dev
+   ```
+5. Configure the webhook URL in the Yuno Dashboard:
+   ```
+   https://abc123.ngrok-free.dev/wp-json/yuno/v1/webhook
+   ```
+6. Ensure **pretty permalinks** are enabled (required for `/wp-json/` routes):
+   ```bash
+   npx wp-env run cli wp rewrite structure '/%postname%/'
+   ```
+
+**When done developing**, revert WordPress URLs:
+```bash
+npx wp-env run cli wp option update siteurl http://localhost:8888
+npx wp-env run cli wp option update home http://localhost:8888
+```
+
+**Important notes:**
+- The ngrok free tier generates a new URL each restart — you must update the Yuno Dashboard webhook URL and WordPress site URLs each session
+- ngrok free tier shows a browser interstitial ("Visit Site") on first access — use an **incognito/private window** to avoid caching issues that can cause infinite loading
+- The `wp-config.php` in the Docker container already includes `HTTP_X_FORWARDED_PROTO` detection for HTTPS reverse proxy support (added by wp-env)
+- ngrok provides a local inspection dashboard at `http://127.0.0.1:4040` where you can see all incoming webhook requests, their payloads, and response codes — useful for debugging
+
 ---
 
 ## Project Structure
@@ -180,6 +232,13 @@ Yuno API (https://api[-env].y.uno)
 - **No exception messages to clients** — `$e->getMessage()` is never returned in REST responses. Generic error messages are used instead.
 - **Redirect origin validation** — all `window.location.href` redirects in `checkout.js` validate that the URL origin matches `window.location.origin` before navigating.
 - **PII redaction in logs** — phone numbers are logged as last 4 digits only. Email addresses logged as boolean `has_email`. Full payloads are never logged.
+
+### Hide Payment Selection
+- **Admin toggle** — `hide_payment_selection` checkbox in gateway settings, disabled by default. Only takes effect when Yuno is the **sole** active payment gateway.
+- **Detection** — `is_yuno_only_gateway()` private method calls `WC()->payment_gateways()->get_available_payment_gateways()` and checks `count === 1 && isset(YUNO_GATEWAY_ID)`. Fail-open: returns `false` if `WC_Payment_Gateways` is unavailable or no gateways are detected.
+- **CSS-only approach** — inline CSS injected via `wp_add_inline_style('yuno-checkout', ...)` in `enqueue_scripts()`. No JS changes required.
+- **Legacy checkout** — hides `#payment ul.payment_methods` and `#payment .payment_box`. The `#payment` container (place order button) remains visible.
+- **Block checkout** — hides the entire `.wp-block-woocommerce-checkout-payment-block`. The place order button lives in a separate block (`wp-block-woocommerce-checkout-actions-block`) and is unaffected.
 
 ### Order Status After Payment
 - **Post-payment status filter** — `woocommerce_payment_complete_order_status` filter (priority 999) determines final order status after successful payment.
@@ -328,17 +387,21 @@ All settings stored in `woocommerce_yuno_settings` WP option (key auto-derived b
 
 | Setting key | Description |
 |-------------|-------------|
+| `enabled` | Enable/disable the Yuno gateway |
+| `title` | Payment method name shown at checkout |
+| `description` | Description shown below the payment method name |
+| `hide_payment_selection` | Hide payment method selection when Yuno is the only active gateway. Disabled by default. Legacy checkout hides radio buttons; block checkout hides the entire payment section. Uses CSS-only approach via `wp_add_inline_style` (fail-open) |
 | `account_id` | Yuno merchant account ID |
 | `public_api_key` | Public key (used by frontend SDK) |
 | `private_secret_key` | Backend-only, never exposed to frontend |
-| `webhook_hmac_secret` | HMAC secret for webhook signature |
-| `webhook_api_key` | `x-api-key` header value |
-| `webhook_x_secret` | `x-secret` header value |
 | `split_enabled` | Enable marketplace split payments |
 | `yuno_recipient_id` | Seller recipient ID for split |
 | `split_commission_percent` | Platform commission % (0–100), overrides fixed |
 | `split_fixed_amount` | Fixed commission in minor currency units |
 | `debug` | Enable WC debug logging |
+| `webhook_api_key` | `x-api-key` header value |
+| `webhook_x_secret` | `x-secret` header value |
+| `webhook_hmac_secret` | HMAC secret for webhook signature |
 
 Credentials can also be set via environment variables or PHP constants (WP options take priority).
 
