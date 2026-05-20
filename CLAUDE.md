@@ -582,3 +582,28 @@ For documentation-only changes (no code changes), sync to SVN trunk and commit w
 - Marketing assets go in SVN `/assets/`, NOT inside `trunk/`
 - All image files in SVN `/assets/` must have `svn:mime-type` property set
 - SVN commits require interactive password — user must run in a separate terminal
+
+---
+
+## Changelog Discipline
+
+This repo keeps **two** changelog surfaces in sync per release, with different audiences and formats. Content parity (same versions, dates, titles) is mandatory; structural differences (sections, headings, tone) are intentional per-surface presentation choices.
+
+1. **`CHANGELOG.md`** at the repo root — internal/developer-facing source of truth, edited directly when a release ships. Follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) **strictly**: `## [X.Y.Z] - YYYY-MM-DD` headings, the six standard sections (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`), no emoji decoration. Bullets use the form `- **Title** — Description.`. A `## [Unreleased]` block sits at the top and accumulates merged work that hasn't been published to WordPress.org yet; once a version is published, move its entries into a new `## [X.Y.Z] - YYYY-MM-DD` block.
+2. **`yuno-payment-gateway/readme.txt`** under `== Changelog ==` — public merchant-facing changelog rendered on the WordPress.org plugin page (`wordpress.org/plugins/yuno-payment-gateway/#developers`). Uses the WordPress.org readme syntax (`= X.Y.Z =` headings, `*` bullets) and a friendlier, less technical tone than the internal `CHANGELOG.md`. Must mirror the same release set but may use simpler language. When a release warrants user attention, also add an `== Upgrade Notice ==` block for that version.
+
+### Rules
+
+- **English only** on both surfaces.
+- **No placeholder entries.** Never write `FIXED: bug` or `Internal improvements`. If a change can't be described in merchant-facing terms, omit the entry (or the entire version if nothing significant shipped).
+- **No internal ticket IDs** in titles or descriptions. Strip `[CORECM-XXXX]`, `[VULS-XXXX]`, `[NO-CODE]` prefixes/suffixes.
+- **No truncation marks** (`...`, `…`). Descriptions must close cleanly — rewrite if necessary.
+- **Title and description must differ.** The title is a short headline; the description gives a one-to-two sentence merchant-facing explanation of what changed and why it matters.
+- **No source-code references** in descriptions — strip file paths and internal class/constant names. The audience is TAMs and merchants, not the plugin engineering team. The internal `CHANGELOG.md` may use slightly more technical language than `readme.txt`, but still no source-code identifiers.
+- **`readme.txt` is the most user-friendly surface** — it's the public WordPress.org page that merchants land on. Prefer plain language over jargon.
+
+### Adding an entry for a new release
+
+1. Update `CHANGELOG.md`: move the `Unreleased` entries into a new `## [X.Y.Z] - YYYY-MM-DD` block (or add them directly to the new version block if you're cutting a release with new work).
+2. Update `yuno-payment-gateway/readme.txt`: add a `= X.Y.Z =` entry under `== Changelog ==` with a merchant-friendly bullet list, and an `== Upgrade Notice ==` block when the release warrants one. Bump `Stable tag` to the new version.
+
