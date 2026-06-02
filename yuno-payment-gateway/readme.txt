@@ -4,7 +4,7 @@ Tags: payments, checkout, payment gateway, credit card, woocommerce
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -95,6 +95,9 @@ or minified.
 
 == Changelog ==
 
+= 1.0.2 =
+* Maintenance update that supports our release automation. Payments and checkout are unaffected.
+
 = 1.0.1 =
 * Add configurable option to hide payment method selection when Yuno is the only active gateway.
 
@@ -107,6 +110,9 @@ or minified.
 * Marketplace split payment support.
 
 == Upgrade Notice ==
+
+= 1.0.2 =
+Maintenance update. No action needed — payments and checkout are unaffected.
 
 = 1.0.1 =
 New option to hide payment method selection when Yuno is the only active gateway.
