@@ -1,6 +1,6 @@
 {
   "name": "thinx-yuno-wc",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -9,7 +9,9 @@
     "env:restart": "wp-env stop && wp-env start",
     "env:destroy": "wp-env destroy",
     "env:clean": "wp-env clean all",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "changelog:generate": "node scripts/changelog/generate.js",
+    "changelog:check": "node scripts/changelog/check.js"
   },
   "keywords": [],
   "author": "",
