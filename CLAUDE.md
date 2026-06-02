@@ -605,5 +605,30 @@ This repo keeps **two** changelog surfaces in sync per release, with different a
 ### Adding an entry for a new release
 
 1. Update `CHANGELOG.md`: move the `Unreleased` entries into a new `## [X.Y.Z] - YYYY-MM-DD` block (or add them directly to the new version block if you're cutting a release with new work).
-2. Update `yuno-payment-gateway/readme.txt`: add a `= X.Y.Z =` entry under `== Changelog ==` with a merchant-friendly bullet list, and an `== Upgrade Notice ==` block when the release warrants one. Bump `Stable tag` to the new version.
+2. Update `yuno-payment-gateway/readme.txt`: add a `= X.Y.Z =` entry under `== Changelog ==` with a merchant-friendly bullet list, and an `== Upgrade Notice ==` block. Bump `Stable tag` to the new version.
+3. For a merchant-facing release, also create `changelog/{X.Y.Z}.json` (see automation below). Run `npm run changelog:check` before opening the PR.
+
+## Public Changelog Automation (docs.y.uno)
+
+Besides WordPress.org, the plugin's changelog is also published to Yuno's public docs at https://docs.y.uno/changelog/plugins/woocommerce. Publishing a GitHub **Release** triggers `sdk-web-demo`'s `/api/webhooks/github-release` endpoint, which reads `changelog/{version}.json` at the tag, prepends it to `changelog/source/woocommerce.json` in `yuno-payments/yuno-docs`, opens a PR, and pings Slack `#yuno-docs`.
+
+So a release touches up to **three** changelog surfaces:
+
+| Surface | File | Required? | How it's published |
+|---------|------|-----------|--------------------|
+| Internal | `CHANGELOG.md` | Always | committed to the repo |
+| WordPress.org | `yuno-payment-gateway/readme.txt` | **Always** | SVN release (merchants update manually) |
+| docs.y.uno | `changelog/{version}.json` (repo root) | **Optional** — merchant-facing only | GitHub Release → webhook → yuno-docs PR |
+
+### The five version surfaces
+
+The plugin version must be **identical** across: `yuno-payment-gateway/package.json`, `package.json` (root), `readme.txt` `Stable tag`, the `.php` `* Version:` header, and the `YUNO_WC_VERSION` constant. The yuno-docs webhook reads the version from **`yuno-payment-gateway/package.json`** (the canonical surface). The Git tag is **`X.Y.Z`** (no `v` prefix — WordPress/SVN convention).
+
+### The release gate
+
+`npm run changelog:check` (`scripts/changelog/check.js`) enforces, for the current version: the five surfaces agree; `CHANGELOG.md`'s newest block matches and is well-formed (`- **Title** — Description.`); `readme.txt` has the version under **both** `== Changelog ==` and `== Upgrade Notice ==` (always required); and `changelog/{version}.json` is valid **when present** (absent ⇒ internal release, not published to docs.y.uno). It runs in **Drone** (`ci_pipeline.yaml`) on PRs to master and is git-free (the CI container has no git). `npm run changelog:generate` seeds `changelog/{version}.json` and the `readme.txt` blocks from `CHANGELOG.md`.
+
+### Cutting a release
+
+Use `/release` (Claude orchestrates) or run the steps by hand — see `.claude/commands/release.md`. After merge, publish to **WordPress.org** (the SVN release above — always) and, **for merchant-facing releases only**, create a **GitHub Release** on tag `X.Y.Z` to publish to **docs.y.uno**. Internal releases (dep bumps, refactors): SVN release only, no `changelog/{version}.json`, no GitHub Release.
 

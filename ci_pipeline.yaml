@@ -1,0 +1,16 @@
+kind: template
+load: frontend_test.yaml
+
+data:
+  testing: true
+  # Release gate for the changelog automation.
+  #
+  # Enforces that the plugin is always coherent for its current version: the
+  # five version surfaces (plugin + root package.json, readme.txt Stable tag,
+  # the .php Version header and YUNO_WC_VERSION) agree, CHANGELOG.md and
+  # readme.txt have the version, and changelog/{version}.json (when present, for
+  # docs.y.uno) is valid. A version bump that breaks any of these fails the PR.
+  # The check is git-free (the test container has no git).
+  test:
+    commands:
+      - node scripts/changelog/check.js
