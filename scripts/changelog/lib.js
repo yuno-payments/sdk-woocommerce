@@ -76,17 +76,6 @@ function readVersionSurfaces() {
   }
 }
 
-/** Numeric semver compare for the X.Y.Z scheme this repo uses. */
-function compareVersions(a, b) {
-  const pa = String(a).replace(/^v/, '').split('.').map(Number)
-  const pb = String(b).replace(/^v/, '').split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0)
-    if (d !== 0) return d
-  }
-  return 0
-}
-
 /**
  * Parse a CHANGELOG bullet `- **Title** — Description.`. The separator is an
  * em-dash with surrounding spaces; descriptions may contain em-dashes, so we
@@ -205,7 +194,6 @@ module.exports = {
   read,
   readPluginVersion,
   readVersionSurfaces,
-  compareVersions,
   parseBullet,
   parseChangelog,
   getReleaseBlock,

@@ -102,12 +102,19 @@ function seedReadme(version, block) {
   // Upgrade Notice: a short seed from the first entry — curate it.
   const upgradeBlock = `= ${version} =\n${block.entries[0].description || block.entries[0].title}\n\n`
 
-  if (!inChangelog) text = insertUnderSection(text, 'Changelog', changelogBlock)
-  if (!inUpgrade) text = insertUnderSection(text, 'Upgrade Notice', upgradeBlock)
+  const seeded = []
+  if (!inChangelog) {
+    text = insertUnderSection(text, 'Changelog', changelogBlock)
+    seeded.push('Changelog')
+  }
+  if (!inUpgrade) {
+    text = insertUnderSection(text, 'Upgrade Notice', upgradeBlock)
+    seeded.push('Upgrade Notice')
+  }
 
   fs.writeFileSync(readmePath, text)
   console.log(
-    `✅ Seeded readme.txt = ${version} = under Changelog${inUpgrade ? '' : ' + Upgrade Notice'}. ` +
+    `✅ Seeded readme.txt = ${version} = under ${seeded.join(' + ')}. ` +
       'Polish the wording (readme is the merchant-facing WordPress.org page).'
   )
 }
@@ -119,5 +126,8 @@ function insertUnderSection(text, sectionName, blockText) {
     console.warn(`⚠ readme.txt has no "== ${sectionName} ==" section — skipped its seed.`)
     return text
   }
-  return text.replace(re, `$1${blockText}`)
+  // Replacer FUNCTION (not a string) so `$` sequences in blockText — e.g. money
+  // amounts like "$100" or "$5 minimum" in a payments changelog — are inserted
+  // literally and never interpreted as replacement patterns ($1, $&, …).
+  return text.replace(re, (match) => match + blockText)
 }
